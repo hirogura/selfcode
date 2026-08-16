@@ -12,6 +12,8 @@ code-server のようにブラウザから使えて、opencodeやFreebuffとの�
 - opencode サーバーはバックエンドが自動起動し、`/opencode/*` でプロキシ（認証情報はブラウザに触れない）
 - **Tailscale serve** で Tailnet 内のみに HTTPS 公開が可能（LAN 非公開）
 
+![ロゴ画像](image-ph.png)
+
 ## インストール（GitHub から）
 
 [GitHub リポジトリ](https://github.com/hirogura/selfcode) から、別の環境にもインストールできます。
