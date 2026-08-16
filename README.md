@@ -73,6 +73,8 @@ PORT=3339 npm start
 | `SELFCODE_TERM_USER` | 自動検出 | ホスト側ターミナルの既定ユーザー（例: `user`。未指定なら uid 1000 以上の実ユーザーを検出） |
 | `SELFCODE_MEMO` | `/opt/lxd-data/note/selfcode-memo.md` | メモパネルの保存先 |
 | `SELFCODE_GITHUB_CONFIG` | `/opt/lxd-data/note/selfcode-github.json` | GitHub 連携の設定保存先（ユーザー名・トークン・登録リポジトリ。トークンはブラウザに返さずサーバー側でのみ使用） |
+| `SELFCODE_TERM_STATE` | `/opt/lxd-data/note/selfcode-term.json` | ターミナルのペイン構成（分割・cwd・id）の保存先。別のPCから同じ selfcode を開いても同じターミナルプロセスに再接続するために使う |
+| `SELFCODE_CHAT_STATE` | `/opt/lxd-data/note/selfcode-chat.json` | チャットで選択中の opencode セッションとワークスペースの保存先 |
 | `SELFCODE_RESTART_CMD` | `systemctl restart selfcode` | 「リスタート」ボタンが実行するコマンド |
 | `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD` | `opencode` / 自動生成 | opencode サーバーの認証 |
 | `OPENCODE_BIN` | `opencode` | opencode バイナリのパス |
@@ -122,6 +124,8 @@ sudo tailscale serve --bg --https=3339 http://127.0.0.1:3339
   - **分割**ボタンでペインを分割（フォーカス中のターミナルのフォルダを引き継ぐ）
   - 各ペインの見出しで **ユーザー切替**（root ⇔ 一般ユーザー）・**ゴミ箱**（リセットしてルートへ）・**×**（閉じる）
   - ツールバーの**ゴミ箱**でターミナル全体をリフレッシュ（全分割を解除して初期状態に戻す）
+  - ターミナルのペイン構成（分割・cwd・id）はサーバー側にも保存されるため、**別のPCから同じ selfcode を開いても同じターミナルセッションに再接続**できます（code-server と同様に、そのまま作業の続きが見えます）
+- opencode チャットで開いている **セッション・ワークスペースもサーバー側に保存**され、別のPCから開いたときに最後に使っていたセッションを自動的に開きます
 - ツールバーの **コンテナ** ボタンで LXD / Docker の稼働中コンテナを選択
   - エクスプローラがコンテナ内の `/` をルートに切り替わり、ファイルの閲覧・編集・アップロードが可能
   - ターミナルもコンテナ内で開きます（コンテナ内のユーザー・シェルで起動）

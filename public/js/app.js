@@ -1016,25 +1016,56 @@ const App = (() => {
   const TERM_VISIBLE_KEY = "selfcode.termVisible";
   const MEMO_VISIBLE_KEY = "selfcode.memoVisible";
 
+  // ペイン構成（分割・cwd・id）のシリアライズ（localStorage とサーバー共有の両方で使う）
+  function serializeTermState() {
+    const ser = (node) => {
+      if (!node) return null;
+      if (node.kind === "pane") return { k: "p", id: node.pane.id, cwd: node.pane.cwd, user: node.pane.user };
+      return { k: node.kind === "row" ? "r" : "c", ch: node.children.map(ser) };
+    };
+    return { root: ser(termState.root), focused: termState.focused ? termState.focused.id : null };
+  }
+
+  // サーバー側への保存（デバウンス）。別のPCから開いても同じターミナルに接続できるようにするため。
+  let termServerSaveTimer = null;
+  let termServerSavePending = null;
+  function saveTermStateToServer() {
+    termServerSavePending = serializeTermState();
+    clearTimeout(termServerSaveTimer);
+    termServerSaveTimer = setTimeout(() => {
+      const s = termServerSavePending;
+      termServerSavePending = null;
+      if (!s) return;
+      API.put("/api/term/state", { state: s }).catch(() => {});
+    }, 300);
+  }
+
   // ペイン構成（分割・cwd・id）を localStorage に保存し、リロード後に復元して再接続できるようにする
   function saveTermState() {
     try {
-      const ser = (node) => {
-        if (!node) return null;
-        if (node.kind === "pane") return { k: "p", id: node.pane.id, cwd: node.pane.cwd, user: node.pane.user };
-        return { k: node.kind === "row" ? "r" : "c", ch: node.children.map(ser) };
-      };
-      localStorage.setItem(TERM_STATE_KEY, JSON.stringify(ser(termState.root)));
+      localStorage.setItem(TERM_STATE_KEY, JSON.stringify(serializeTermState()));
       if (termState.focused) localStorage.setItem(TERM_FOCUS_KEY, termState.focused.id);
     } catch {}
+    saveTermStateToServer();
   }
 
-  function restoreTermState() {
+  // ペイン構成を復元する。サーバー側に保存された構成を優先し（別のPCで使っていた構成）、
+  // 無ければこのブラウザの localStorage を使う。どちらも無ければ false を返す。
+  async function restoreTermState() {
     let data = null;
     try {
-      data = JSON.parse(localStorage.getItem(TERM_STATE_KEY));
+      const d = await API.get("/api/term/state");
+      if (d && d.state && typeof d.state === "object") data = d.state;
     } catch {}
-    if (!data || typeof data !== "object" || (data.k !== "p" && data.k !== "r" && data.k !== "c")) return false;
+    if (!data) {
+      try {
+        data = JSON.parse(localStorage.getItem(TERM_STATE_KEY));
+      } catch {}
+    }
+    // サーバー形式は { root, focused }、旧 localStorage 形式はツリー直列
+    const rootData = data && typeof data === "object" && data.root !== undefined ? data.root : data;
+    const fid = (data && data.focused) || localStorage.getItem(TERM_FOCUS_KEY);
+    if (!rootData || typeof rootData !== "object" || (rootData.k !== "p" && rootData.k !== "r" && rootData.k !== "c")) return false;
     const build = (d, parent) => {
       if (d.k === "p") {
         const pane = createPane(d.cwd || "", d.id, d.user);
@@ -1062,19 +1093,18 @@ const App = (() => {
       initDivider(div, wrapEl, kind);
       return node;
     };
-    const root = build(data, null);
+    const root = build(rootData, null);
     termState.root = root;
     if (root && root.el) els.terminalWorkspace.appendChild(root.el);
-    const fid = localStorage.getItem(TERM_FOCUS_KEY);
     if (fid && termState.panes.has(fid)) termState.focused = termState.panes.get(fid);
     return true;
   }
 
-  function setupTerminal() {
+  async function setupTerminal() {
     const Terminal = window.Terminal;
     if (!Terminal) return;
     // 前回のペイン構成（分割・cwd・id）を復元して、サーバー側で保持しているプロセスに再接続する
-    const restored = restoreTermState();
+    const restored = await restoreTermState();
     if (!restored) {
       const pane = createPane("");
       const node = paneNode(pane);
@@ -1644,7 +1674,7 @@ const App = (() => {
       console.error(e);
     }
     // termUser が確定してからターミナルを構築する（既定ユーザーを反映するため）
-    setupTerminal();
+    await setupTerminal();
     updateAllTitles();
     updateAllUserBtns();
     loadTreeState();
@@ -1677,9 +1707,19 @@ const App = (() => {
     });
     els.memoInput.addEventListener("input", markMemoDirty);
 
-    // ページを離れる直前に未保存のメモをベストエフォートで保存する
+    // ページを離れる直前に未保存のメモ・ターミナル構成をベストエフォートで保存する
     window.addEventListener("beforeunload", () => {
       if (memoDirty) API.memo.put(els.memoInput.value).catch(() => {});
+      if (termServerSavePending) {
+        try {
+          fetch("/api/term/state", {
+            method: "PUT",
+            keepalive: true,
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ state: termServerSavePending }),
+          }).catch(() => {});
+        } catch {}
+      }
     });
 
     document.addEventListener("keydown", (e) => {

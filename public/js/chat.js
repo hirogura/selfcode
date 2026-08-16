@@ -130,8 +130,18 @@ const Chat = (() => {
       current = s.id;
       refreshSessions(s.id);
       loadMessages(s.id);
+      saveChatState();
       return s.id;
     });
+  }
+
+  // 選択中のセッションとワークスペースをサーバーに保存する（別のPCから開いても同じセッションに接続できるようにする）
+  let chatStateSaveTimer = null;
+  function saveChatState() {
+    clearTimeout(chatStateSaveTimer);
+    chatStateSaveTimer = setTimeout(() => {
+      API.put("/api/chat/state", { sessionId: current || null, directory }).catch(() => {});
+    }, 300);
   }
 
   async function heal() {
@@ -162,6 +172,7 @@ const Chat = (() => {
       el.dirLabel.title = "チャットのワークスペース（クリックで変更）: " + directory;
     }
     toast("チャットワークスペース: " + directory);
+    saveChatState();
     await heal();
   }
 
@@ -170,6 +181,7 @@ const Chat = (() => {
     current = s.id;
     await refreshSessions(s.id);
     await loadMessages(s.id);
+    saveChatState();
   }
 
   async function deleteSession() {
@@ -184,6 +196,7 @@ const Chat = (() => {
     current = sessions[0] ? sessions[0].id : null;
     refreshSessionSelect();
     await loadMessages(current);
+    saveChatState();
   }
 
   function clearView() {
@@ -649,6 +662,7 @@ const Chat = (() => {
     el.sessionSel.onchange = async () => {
       current = el.sessionSel.value || null;
       await loadMessages(current);
+      saveChatState();
     };
     if (el.dirLabel) {
       el.dirLabel.onclick = async () => {
@@ -670,12 +684,20 @@ const Chat = (() => {
 
   async function init() {
     wire();
+    let savedChat = null;
     try {
       const st = await API.status();
       directory = (st.workspace || "/").replace(/\/+$/, "") || "/";
     } catch (e) {
       directory = "/";
     }
+    // 別のPCで使っていたチャットセッション・ワークスペースを復元する
+    try {
+      savedChat = await API.get("/api/chat/state");
+    } catch (e) {
+      savedChat = null;
+    }
+    if (savedChat && savedChat.directory) directory = savedChat.directory;
     API.oc.setDirectory(directory);
     if (el.dirLabel) {
       el.dirLabel.textContent = directory;
@@ -683,7 +705,7 @@ const Chat = (() => {
     }
     try {
       await loadSelectors();
-      await refreshSessions();
+      await refreshSessions(savedChat && savedChat.sessionId ? savedChat.sessionId : undefined);
       if (!current) {
         const s = await API.oc.createSession("new session");
         current = s.id;
@@ -691,6 +713,7 @@ const Chat = (() => {
       }
       await loadMessages(current);
       setStatus(true);
+      saveChatState();
     } catch (e) {
       setStatus(false);
       showError(e.message);

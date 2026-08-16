@@ -578,6 +578,66 @@ app.put("/api/memo", async (req, res, next) => {
   }
 });
 
+// ================= セッション状態の共有 =================
+// 別のPCから同じ selfcode を開いても同じセッション（ターミナル・チャット選択）に
+// 接続できるよう、ブラウザの localStorage にしか無かった状態をサーバー側にも保存する。
+const TERM_STATE_FILE = process.env.SELFCODE_TERM_STATE || "/opt/lxd-data/note/selfcode-term.json";
+const CHAT_STATE_FILE = process.env.SELFCODE_CHAT_STATE || "/opt/lxd-data/note/selfcode-chat.json";
+
+// JSON ファイルを読み込む（無ければ fallback を返す）
+async function readStateFile(file, fallback) {
+  try {
+    return JSON.parse((await fsp.readFile(file)).toString("utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+async function writeStateFile(file, data) {
+  await fsp.mkdir(path.dirname(file), { recursive: true });
+  await fsp.writeFile(file, JSON.stringify(data, null, 2));
+}
+
+// ターミナルのペイン構成（分割・cwd・id・フォーカス）。id ごとにサーバー側の
+// プロセスが保持されているため、別のPCから同じ構成で接続すると同じターミナルに繋がる。
+app.get("/api/term/state", async (req, res, next) => {
+  try {
+    res.json({ state: await readStateFile(TERM_STATE_FILE, null) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.put("/api/term/state", async (req, res, next) => {
+  try {
+    const state = req.body && req.body.state;
+    if (state === undefined) return res.status(400).json({ error: "state required" });
+    await writeStateFile(TERM_STATE_FILE, state);
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// チャットパネルで選択中の opencode セッションとワークスペース（ディレクトリ）
+app.get("/api/chat/state", async (req, res, next) => {
+  try {
+    res.json(await readStateFile(CHAT_STATE_FILE, {}));
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.put("/api/chat/state", async (req, res, next) => {
+  try {
+    const { sessionId, directory } = req.body || {};
+    await writeStateFile(CHAT_STATE_FILE, { sessionId: sessionId || null, directory: directory || "" });
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // ================= GitHub 連携 =================
 // 設定（ユーザー名・トークン・登録リポジトリ）はサーバー側の JSON に保存し、トークンをブラウザに返さない。
 // git 操作はワークスペース内（コンテナ内ではコンテナ側）で実行する。
