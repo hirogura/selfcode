@@ -1,0 +1,25 @@
+[Unit]
+Description=selfcode - self-hosted code editor with opencode integration
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/lxd-data/selfcode
+ExecStart=/usr/bin/node /opt/lxd-data/selfcode/server.js
+Restart=always
+RestartSec=3
+Environment=PORT=3339
+# 127.0.0.1 のみ待受（LAN 非公開）。Tailscale serve で Tailnet 内に HTTPS 公開する想定
+Environment=HOST=127.0.0.1
+# systemd サービスでは $HOME が未設定になるため明示する（git config --global / opencode の設定読み込みに必要）
+Environment=HOME=/root
+# Environment=ROOT=/home/user/myproject
+# Environment=SELFCODE_PASSWORD=change-me
+# Environment=SELFCODE_USERNAME=admin
+# Environment=OPENCODE_SERVER_PASSWORD=change-me
+# Environment=OPENCODE_BIN=/root/.opencode/bin/opencode
+Environment=PATH=/root/.opencode/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+
+[Install]
+WantedBy=multi-user.target

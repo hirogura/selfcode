@@ -1,0 +1,22 @@
+{
+  "name": "selfcode",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted browser code editor with opencode integration",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "express": "^4.21.2",
+    "monaco-editor": "^0.52.2",
+    "node-pty": "^1.0.0",
+    "ws": "^8.18.0"
+  }
+}

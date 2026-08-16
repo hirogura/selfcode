@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>selfcode</title>
+<link rel="stylesheet" href="/xterm-css/xterm.css">
+<link rel="stylesheet" href="/css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='16' fill='%236e7681'/><text x='36' y='70' font-size='52' text-anchor='middle' fill='white' font-family='monospace' font-weight='bold'>S</text><polyline points='58,40 80,54 58,68' fill='none' stroke='%23d1d5db' stroke-width='9' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="brand">
+      <span class="logo"><svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><text x="36" y="70" font-size="52" text-anchor="middle" fill="#fff" font-family="monospace" font-weight="bold">S</text><polyline points="58,40 80,54 58,68" fill="none" stroke="#d1d5db" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <span class="title">selfcode</span>
+    </div>
+    <div id="workspace-label" class="workspace-label"></div>
+    <div class="topbar-actions">
+      <button id="btn-new-file" class="btn" title="新しいファイル"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg><span>ファイル作成</span></button>
+      <button id="btn-new-folder" class="btn" title="新しいフォルダ"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg><span>フォルダ作成</span></button>
+      <button id="btn-refresh" class="btn" title="リフレッシュ"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span>リフレッシュ</span></button>
+      <button id="btn-container" class="btn toggle" title="コンテナを選択 (LXD/Docker)"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg><span class="btn-label">コンテナ</span></button>
+      <span class="divider"></span>
+      <button id="btn-terminal" class="btn toggle" title="ターミナルの表示切替 (Ctrl+J)"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg><span>ターミナル</span></button>
+      <button id="btn-github" class="btn toggle" title="GitHub パネル（連携設定・リポジトリ操作）"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg><span>GitHub</span></button>
+      <button id="btn-freebuff" class="btn toggle" title="freebuff チャットをターミナルで起動">freebuff</button>
+      <button id="btn-opencode" class="btn" title="opencode を分割ターミナルで起動">opencode</button>
+      <button id="btn-chat" class="btn toggle" title="opencode チャットの表示切替 (Ctrl+B)">opencodeチャット</button>
+      <button id="btn-memo" class="btn toggle" title="メモの表示切替"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11l5-5V5a2 2 0 0 0-2-2Z"/><path d="M14 3v4a2 2 0 0 0 2 2h4"/><line x1="8" y1="13" x2="12" y2="13"/><line x1="8" y1="17" x2="12" y2="17"/></svg><span>メモ</span></button>
+      <span class="divider"></span>
+      <button id="btn-restart" class="btn" title="selfcode を再起動 (systemctl restart selfcode)"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg><span>リスタート</span></button>
+    </div>
+    <div id="oc-status" class="oc-status" title="opencode サーバー状態"><span class="dot"></span><span class="label">connecting…</span></div>
+  </header>
+
+  <div id="layout">
+    <aside id="sidebar">
+      <div class="sidebar-head">
+        <span>EXPLORER</span>
+        <div class="sidebar-head-actions">
+          <label class="hidden-toggle" title="隠しファイルを表示"><input type="checkbox" id="show-hidden" checked><span>隠し</span></label>
+        </div>
+      </div>
+      <div id="tree" class="tree"></div>
+    </aside>
+    <div class="divider-v" id="divider-sidebar" title="ドラッグで幅を調整"></div>
+
+    <main id="main">
+      <div id="tabs" class="tabs"></div>
+      <div id="editor-host" class="editor-host">
+        <div id="empty-state" class="empty-state">
+          <div class="empty-inner">
+            <div class="empty-logo"><svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><text x="36" y="70" font-size="52" text-anchor="middle" fill="#fff" font-family="monospace" font-weight="bold">S</text><polyline points="58,40 80,54 58,68" fill="none" stroke="#d1d5db" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <h1>selfcode</h1>
+            <p>ファイルを選ぶか、opencode に質問を送ってください。</p>
+            <div class="empty-shortcuts">
+              <span><kbd>Ctrl</kbd>+<kbd>S</kbd> 保存</span>
+              <span><kbd>Ctrl</kbd>+<kbd>B</kbd> チャット</span>
+              <span><kbd>Ctrl</kbd>+<kbd>J</kbd> ターミナル</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="divider-h hidden" id="divider-terminal" title="ドラッグで高さを調整"></div>
+      <div id="terminal" class="terminal hidden">
+        <div class="panel-head">
+          <span>TERMINAL <span class="hint">Shift+dragで選択 → Ctrl+C/右クリックでコピー・貼り付け</span></span>
+          <div>
+            <button id="btn-term-clear" class="btn small" title="クリア">クリア</button>
+            <button id="btn-term-split" class="btn small" title="分割（フォーカス中のターミナルを現在のフォルダでもう1つ開く）">分割</button>
+            <button id="btn-term-refresh" class="btn small" title="ターミナルをリセットして閉じる"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
+          </div>
+        </div>
+        <div id="terminal-workspace"></div>
+      </div>
+    </main>
+
+    <div class="divider-v hidden" id="divider-github" title="ドラッグで幅を調整"></div>
+    <aside id="github" class="github hidden">
+      <div class="github-head">
+        <span>GITHUB <span class="hint">連携設定・リポジトリ操作</span></span>
+        <div class="github-head-actions">
+          <button id="btn-github-close" class="btn small" title="閉じる">×</button>
+        </div>
+      </div>
+      <div id="github-body" class="github-body">
+        <div class="gh-section">
+          <div class="gh-sec-head"><span>設定</span></div>
+          <div class="gh-field">
+            <label for="gh-username">ユーザー名</label>
+            <input id="gh-username" type="text" placeholder="GitHub ユーザー名" autocomplete="off">
+          </div>
+          <div class="gh-field">
+            <label for="gh-token">トークン（Personal Access Token）</label>
+            <div class="gh-token-row">
+              <input id="gh-token" type="password" placeholder="ghp_…" autocomplete="off">
+              <button id="gh-token-toggle" class="btn small" title="トークンの表示/非表示">👁</button>
+            </div>
+          </div>
+          <div class="gh-actions">
+            <button id="gh-save" class="btn small primary">保存</button>
+            <button id="gh-check" class="btn small">接続確認</button>
+            <button id="gh-clear" class="btn small danger">クリア</button>
+          </div>
+          <div id="gh-settings-status" class="gh-status"></div>
+        </div>
+        <div class="gh-section">
+          <div class="gh-sec-head">
+            <span>リポジトリ</span>
+            <div class="gh-sec-actions">
+              <button id="gh-repos-refresh" class="btn small" title="再読み込み">再読み込み</button>
+              <button id="gh-add-toggle" class="btn small primary">＋ 追加</button>
+            </div>
+          </div>
+          <div id="gh-add" class="gh-add hidden">
+            <div class="gh-field">
+              <label for="gh-repo-url">URL または owner/repo</label>
+              <input id="gh-repo-url" type="text" placeholder="https://github.com/owner/repo" autocomplete="off">
+            </div>
+            <div class="gh-field">
+              <label for="gh-repo-dir">保存先フォルダ名（省略可）</label>
+              <input id="gh-repo-dir" type="text" placeholder="リポジトリ名が使われます" autocomplete="off">
+            </div>
+            <div class="gh-add-actions">
+              <button id="gh-clone" class="btn small primary">クローン</button>
+              <button id="gh-own-toggle" class="btn small">自分のリポジトリから選ぶ</button>
+            </div>
+            <div id="gh-own" class="gh-own hidden"></div>
+            <div class="gh-field gh-field-existing">
+              <label for="gh-existing">既存フォルダを登録（ワークスペース内のパス）</label>
+              <div class="gh-token-row">
+                <input id="gh-existing" type="text" placeholder="例: workspace/myrepo" autocomplete="off">
+                <button id="gh-register-existing" class="btn small">登録</button>
+              </div>
+            </div>
+          </div>
+          <div id="gh-repos" class="gh-repos"></div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="divider-v hidden" id="divider-chat" title="ドラッグで幅を調整"></div>
+    <aside id="chat" class="chat hidden">
+      <div id="memo" class="memo hidden">
+        <div class="memo-head">
+          <span>MEMO <span class="hint">/opt/lxd-data/note/selfcode-memo.md</span></span>
+          <div class="memo-head-actions">
+            <button id="btn-memo-save" class="btn small" title="保存 (Ctrl+S)">Save</button>
+            <button id="btn-memo-close" class="btn small" title="閉じる">×</button>
+          </div>
+        </div>
+        <textarea id="memo-input" placeholder="メモを入力…（Ctrl+S で保存）"></textarea>
+      </div>
+      <div class="divider-h hidden" id="divider-memo" title="ドラッグで高さを調整"></div>
+      <div id="chat-content" class="chat-content hidden">
+        <div class="chat-head">
+          <span class="chat-title">
+            <span class="logo oc">⚡</span> opencode
+          </span>
+          <span id="chat-dir-label" class="chat-dir-label" title="チャットのワークスペース（クリックで変更）">/</span>
+          <div class="chat-head-actions">
+            <button id="btn-new-session" class="btn small" title="新しいセッション">New</button>
+            <button id="btn-del-session" class="btn small danger" title="セッションを削除">×</button>
+          </div>
+        </div>
+        <div class="chat-selectors">
+          <select id="chat-session" title="セッション"></select>
+          <select id="chat-agent" title="エージェント"><option value="">agent: default</option></select>
+          <select id="chat-model" title="モデル"><option value="">model: default</option></select>
+        </div>
+        <div id="chat-messages" class="chat-messages"></div>
+        <div class="chat-input-wrap">
+          <textarea id="chat-input" rows="1" placeholder="opencode に質問… (Enterで送信, Shift+Enterで改行)"></textarea>
+          <div class="chat-input-actions">
+            <button id="btn-chat-stop" class="btn small danger hidden" title="停止">■ Stop</button>
+            <button id="btn-chat-send" class="btn small primary" title="送信">Send</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script src="/xterm/xterm.js"></script>
+<script src="/xterm-fit/addon-fit.js"></script>
+<script src="/monaco/loader.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/chat.js"></script>
+<script src="/js/github.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>
