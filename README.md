@@ -12,7 +12,7 @@ code-server のようにブラウザから使えて、opencodeやFreebuffとの�
 - opencode サーバーはバックエンドが自動起動し、`/opencode/*` でプロキシ（認証情報はブラウザに触れない）
 - **Tailscale serve** で Tailnet 内のみに HTTPS 公開が可能（LAN 非公開）
 
-![ロゴ画像](image-ph.png)
+![ロゴ画像](image-ph2.png)
 
 ## インストール（GitHub から）
 
@@ -168,6 +168,8 @@ sudo npm uninstall -g freebuff
 - opencode のモデル設定・プロバイダ認証はホスト側の `~/.config/opencode/` を使います。
 - opencode サーバーは 127.0.0.1 の一時ポートで起動し、外部には公開しません。
 - 認証情報やデータベースなどの個人情報は `.gitignore` でリポジトリから除外されています。
+
+<img src="image-ph.png" alt="ロゴ画像" width="320">
 
 ## ライセンス
 
