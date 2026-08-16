@@ -28,6 +28,8 @@ const App = (() => {
   const models = new Map();
   let activePath = null;
   let selectedDir = "";
+  // タッチ端末（iPad など）では区切り線のドラッグが使いにくいため、ターミナルを開いたときに広げる判定に使う
+  const IS_TOUCH = "ontouchstart" in window || navigator.maxTouchPoints > 0;
 
   // エクスプローラで展開中のフォルダ（リロード後も復元する）
   const expandedDirs = new Set();
@@ -115,6 +117,8 @@ const App = (() => {
 
   async function openFile(path) {
     if (!path) return;
+    // エディタを隠しているときにファイルを開いたら、エディタを表示し直す
+    if (els.editorHost.classList.contains("hidden")) setEditorPanelVisible(true);
     const existing = docs.get(path);
     if (existing) {
       activateTab(path);
@@ -965,7 +969,7 @@ const App = (() => {
 
   function initDivider(div, wrapEl, dir) {
     div.style.cursor = dir === "row" ? "col-resize" : "row-resize";
-    div.addEventListener("mousedown", (e) => {
+    div.addEventListener("pointerdown", (e) => {
       e.preventDefault();
       e.stopPropagation();
       const kids = Array.from(wrapEl.children).filter((c) => c !== div);
@@ -986,12 +990,12 @@ const App = (() => {
       };
       const onUp = () => {
         div.classList.remove("active");
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
         fitAll();
       };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
     });
   }
 
@@ -1127,10 +1131,14 @@ const App = (() => {
   }
 
   function showTerminalPanel() {
+    const wasHidden = els.terminal.classList.contains("hidden");
     els.terminal.classList.remove("hidden");
     $("btn-terminal").classList.add("active");
     $("divider-terminal").classList.remove("hidden");
     localStorage.setItem(TERM_VISIBLE_KEY, "1");
+    // iPad などタッチ端末では区切り線のドラッグで高さを変えられないため、
+    // ターミナルを開いたときはほぼ全高まで広げて使えるようにする
+    if (wasHidden && IS_TOUCH) els.terminal.style.height = termMaxH() + "px";
     setTimeout(() => {
       fitAll();
       const p = activePane();
@@ -1320,8 +1328,8 @@ const App = (() => {
       }
       state.mode = null;
       document.body.classList.remove("resizing-v", "resizing-h");
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
       fitAll();
     };
     const begin = (e, mode, el) => {
@@ -1333,14 +1341,15 @@ const App = (() => {
       state.startH = r.height;
       e.preventDefault();
       document.body.classList.add(mode === "terminal" || mode === "memo" ? "resizing-h" : "resizing-v");
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
     };
-    $("divider-sidebar").addEventListener("mousedown", (e) => begin(e, "sidebar", els.sidebar));
-    $("divider-github").addEventListener("mousedown", (e) => begin(e, "github", els.github));
-    $("divider-chat").addEventListener("mousedown", (e) => begin(e, "chat", els.chat));
-    $("divider-terminal").addEventListener("mousedown", (e) => begin(e, "terminal", els.terminal));
-    $("divider-memo").addEventListener("mousedown", (e) => begin(e, "memo", els.memo));
+    // pointer イベントを使うことでマウスとタッチ（iPad など）の両方でドラッグできる
+    $("divider-sidebar").addEventListener("pointerdown", (e) => begin(e, "sidebar", els.sidebar));
+    $("divider-github").addEventListener("pointerdown", (e) => begin(e, "github", els.github));
+    $("divider-chat").addEventListener("pointerdown", (e) => begin(e, "chat", els.chat));
+    $("divider-terminal").addEventListener("pointerdown", (e) => begin(e, "terminal", els.terminal));
+    $("divider-memo").addEventListener("pointerdown", (e) => begin(e, "memo", els.memo));
   }
 
 
@@ -1360,6 +1369,26 @@ const App = (() => {
     els.chatContent.classList.toggle("hidden");
     $("btn-chat").classList.toggle("active", !els.chatContent.classList.contains("hidden"));
     syncChatPanel();
+  }
+
+  // ---- エクスプローラ / エディタの表示切替（ツールバー左端のボタン） ----
+  function toggleExplorer() {
+    const show = els.sidebar.classList.contains("hidden");
+    els.sidebar.classList.toggle("hidden", !show);
+    $("divider-sidebar").classList.toggle("hidden", !show);
+    $("btn-explorer").classList.toggle("active", show);
+  }
+
+  function setEditorPanelVisible(show) {
+    els.editorHost.classList.toggle("hidden", !show);
+    els.tabs.classList.toggle("hidden", !show);
+    els.main.classList.toggle("editor-hidden", !show);
+    $("btn-editor").classList.toggle("active", show);
+    if (show) updateEmptyState();
+  }
+
+  function toggleEditorPanel() {
+    setEditorPanelVisible(els.editorHost.classList.contains("hidden"));
   }
 
   // ---- コンテナ (LXD/Docker) ----
@@ -1626,6 +1655,8 @@ const App = (() => {
     $("btn-container").onclick = openContainerPicker;
     $("btn-new-file").onclick = () => createFile(selectedDir);
     $("btn-new-folder").onclick = () => createFolder(selectedDir);
+    $("btn-explorer").onclick = toggleExplorer;
+    $("btn-editor").onclick = toggleEditorPanel;
     $("btn-terminal").onclick = toggleTerminal;
     $("btn-chat").onclick = toggleChat;
     $("btn-freebuff").onclick = openFreebuffTerminal;
