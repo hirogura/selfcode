@@ -729,7 +729,7 @@ async function runGit(relDir, args, timeoutMs) {
   return runGitSpawn(resolveDirRel(relDir), [...auth, ...args], timeoutMs);
 }
 
-// git status -sb の出力から ブランチ・ahead/behind・変更ファイル数を取り出す
+// git status -sb の出力から ブランチ・ahead/behind・変更ファイル（数と一覧）を取り出す
 async function repoGitStatus(relDir) {
   const r = await runGit(relDir, ["status", "-sb"], 30000);
   if (r.code !== 0) throw new Error((r.stderr || r.stdout || "git status failed").trim());
@@ -737,31 +737,53 @@ async function repoGitStatus(relDir) {
   let branch = "";
   let ahead = 0;
   let behind = 0;
-  const first = (lines[0] || "").trim();
-  if (first.startsWith("## ")) {
-    let rest = first.slice(3);
-    const mUp = rest.match(/^(.+?)\.\.\.(.*)$/);
-    if (mUp) {
-      branch = mUp[1].trim();
-      rest = mUp[2];
-    } else {
-      const mBr = rest.match(/^(\S+)/);
-      branch = mBr ? mBr[1] : rest;
-      rest = "";
-    }
-    const mB = rest.match(/\[([^\]]*)\]$/);
-    if (mB) {
-      for (const part of mB[1].split(",")) {
-        const p = part.trim();
-        let mm = p.match(/^ahead (\d+)$/);
-        if (mm) ahead = Number(mm[1]);
-        mm = p.match(/^behind (\d+)$/);
-        if (mm) behind = Number(mm[1]);
+  const files = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trimEnd();
+    if (i === 0) {
+      const first = line.trim();
+      if (first.startsWith("## ")) {
+        let rest = first.slice(3);
+        const mUp = rest.match(/^(.+?)\.\.\.(.*)$/);
+        if (mUp) {
+          branch = mUp[1].trim();
+          rest = mUp[2];
+        } else {
+          const mBr = rest.match(/^(\S+)/);
+          branch = mBr ? mBr[1] : rest;
+          rest = "";
+        }
+        const mB = rest.match(/\[([^\]]*)\]$/);
+        if (mB) {
+          for (const part of mB[1].split(",")) {
+            const p = part.trim();
+            let mm = p.match(/^ahead (\d+)$/);
+            if (mm) ahead = Number(mm[1]);
+            mm = p.match(/^behind (\d+)$/);
+            if (mm) behind = Number(mm[1]);
+          }
+        }
       }
+    } else if (line.trim()) {
+      files.push(parseStatusFileLine(line));
     }
   }
-  const dirty = Math.max(0, lines.length - 1);
-  return { branch, ahead, behind, dirty };
+  const dirty = files.length;
+  return { branch, ahead, behind, dirty, files };
+}
+
+// git status -sb の変更ファイル行（" M foo.txt" / "M  foo.txt" / "?? new.txt" / "R  old -> new" など）から
+// 状態コードとパスを取り出す
+function parseStatusFileLine(line) {
+  let f = line.slice(3);
+  // リネーム/コピーは "旧 -> 新" 形式なので新しいパスを採用する
+  const arrow = f.indexOf(" -> ");
+  if (arrow >= 0) f = f.slice(arrow + 4);
+  // core.quotepath による引用符（C エスケープ）を外す
+  if (f.startsWith('"') && f.endsWith('"')) {
+    try { f = JSON.parse(f); } catch { f = f.slice(1, -1); }
+  }
+  return { code: line.slice(0, 2).trim() || "?", path: f };
 }
 
 function githubRepoId() {
@@ -967,7 +989,12 @@ app.post("/api/github/repos/:id/action", async (req, res, next) => {
       if (st.behind) bits.push("behind " + st.behind);
       if (st.dirty) bits.push("変更 " + st.dirty + " ファイル");
       if (st.error) bits.push("エラー: " + st.error);
-      return res.json({ ok: !st.error, action, output: bits.join(" ・ ") || "クリーン", repo: { id: repo.id, ...st } });
+      let output = bits.join(" ・ ") || "クリーン";
+      // 変更ファイル名の一覧を追記する（M=変更, A=追加, D=削除, R=リネーム, ??=未追跡, UU=競合）
+      if (Array.isArray(st.files) && st.files.length) {
+        output += "\n" + st.files.map((f) => f.code + " " + f.path).join("\n");
+      }
+      return res.json({ ok: !st.error, action, output, repo: { id: repo.id, ...st } });
     }
     if (action === "commit") {
       const message = String(req.body.message || "").trim();
