@@ -107,6 +107,10 @@ const App = (() => {
       }
     },
     openFile: (p) => openFile(relPath(p)),
+    openTerminalAt: (p) => openTerminalAt(p || ""),
+    revealInExplorer: (p) => revealInExplorer(p || ""),
+    // GitHub パネルの Term ボタン用: ターミナルで開き、エクスプローラもそのフォルダへ移動する
+    openFolderAt: (p) => openFolderAt(p || ""),
   };
 
   async function openFile(path) {
@@ -1183,6 +1187,59 @@ const App = (() => {
     showTerminalPanel();
     const pane = activePane();
     if (pane) setPaneCwd(pane, relPath);
+  }
+
+  // GitHub パネルの Term ボタン用: ターミナルで開き、エクスプローラもそのフォルダへ移動する。
+  // ターミナルが既に開いている場合は分割して新しいペインで開き、閉じている場合は最初のペインを使う。
+  function openFolderAt(relPath) {
+    const p = relPath || "";
+    const wasHidden = els.terminal.classList.contains("hidden");
+    showTerminalPanel();
+    const pane = activePane();
+    if (pane) {
+      if (wasHidden) {
+        const first = firstPaneIn(termState.root);
+        if (first) setPaneCwd(first, p);
+      } else {
+        splitPane(pane); // 分割後は新しいペインがフォーカスされる
+        const np = activePane();
+        if (np) setPaneCwd(np, p);
+      }
+    }
+    revealInExplorer(p);
+  }
+
+  // エクスプローラを指定フォルダまで展開して選択・スクロールする（GitHub パネルの Term ボタン用）
+  function revealInExplorer(relPath) {
+    const path = String(relPath || "").replace(/^\/+/, "");
+    // ルートからターゲットまでの全フォルダ（ターゲット自身も含む）を展開対象にする
+    const parts = path.split("/").filter(Boolean);
+    let cur = "";
+    for (const part of parts) {
+      cur = cur ? cur + "/" + part : part;
+      expandedDirs.add(cur);
+    }
+    saveTreeState();
+    refreshTree();
+    // populate は非同期（階層が深いと複数ラウンド）なので、ノードが現れるまで待ってから選択・スクロールする
+    const selectWhenReady = () => {
+      let target = null;
+      for (const n of els.tree.querySelectorAll(".tree-node")) {
+        if (n.dataset.path === path) {
+          target = n;
+          break;
+        }
+      }
+      if (!target) return false;
+      for (const n of els.tree.querySelectorAll(".tree-node")) n.classList.remove("selected");
+      target.classList.add("selected");
+      try { target.scrollIntoView({ block: "nearest" }); } catch {}
+      return true;
+    };
+    let tries = 0;
+    const iv = setInterval(() => {
+      if (selectWhenReady() || ++tries > 40) clearInterval(iv);
+    }, 100);
   }
 
   // 指定フォルダを cwd として freebuff のチャット TUI を起動する（右クリックメニュー用）

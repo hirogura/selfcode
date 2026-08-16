@@ -186,6 +186,7 @@ const GithubPanel = (() => {
       "</div>" +
       '<div class="gh-repo-meta">' + esc(meta) + "</div>" +
       '<div class="gh-repo-actions">' +
+      '<button class="btn small" data-act="term" title="ターミナルで開き、エクスプローラもそのフォルダへ移動">Term</button>' +
       '<button class="btn small" data-act="status">状態</button>' +
       '<button class="btn small" data-act="fetch">取得</button>' +
       '<button class="btn small primary" data-act="pull">pull</button>' +
@@ -227,6 +228,12 @@ const GithubPanel = (() => {
     const btn = e.target.closest(".gh-repo-actions .btn");
     if (!btn) return;
     const id = btn.closest(".gh-repo").dataset.id;
+    if (btn.dataset.act === "term") {
+      // そのリポジトリのフォルダをターミナルで開き、エクスプローラもその場所へ移動する
+      const repo = lastRegistered.find((r) => r.id === id);
+      if (repo && window.App && window.App.openFolderAt) window.App.openFolderAt(repo.path);
+      return;
+    }
     if (btn.dataset.act === "commit") {
       btn.closest(".gh-repo").querySelector(".gh-commit-row").classList.toggle("hidden");
       return;
