@@ -1246,14 +1246,14 @@ const App = (() => {
           "認証が完了したら、もう一度このボタンを押して OFF にしてください。\n" +
           "続行しますか？";
       } else {
-        const userDesc = termUser && termUser !== "root" ? `ユーザー「${termUser}」および root` : "ユーザーおよび root";
+        const userDesc = termUser && termUser !== "root" ? `ユーザー「${termUser}」` : "現在のユーザー";
         confirmMsg =
           "「一時SSH」を ON にします。\n\n" +
           `対象: ${targetLabel}\n` +
-          `・${userDesc}のパスワードを「selfcode」に設定\n` +
           "・SSH のパスワード認証を一時的に有効化\n" +
           "・キーリング（D-Bus / Secret Service）連携を有効化\n" +
           "・sshd を再起動\n\n" +
+          `※ パスワードは変更しません。${userDesc}の既存パスワードで SSH 接続してください。\n\n` +
           "認証が完了したら、もう一度このボタンを押して OFF にしてください。\n" +
           "続行しますか？";
       }

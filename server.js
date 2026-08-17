@@ -311,10 +311,8 @@ systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || servi
 echo "[selfcode] SSH 設定を元に戻しました"
 `;
 
-// ホストPC用の一時SSH有効化スクリプト（キーリング連携設定を含む）
+// ホストPC用の一時SSH有効化スクリプト（パスワードは変更せず既存パスワードを使用、キーリング連携設定を含む）
 function getSshTempOnHostScript() {
-  const user = TERM_USER;
-  const userPasswdCmd = user && user !== "root" ? `echo '${user}:selfcode' | chpasswd` : "";
   return `
 set -e
 if [ ! -f /etc/ssh/sshd_config ]; then
@@ -322,9 +320,6 @@ if [ ! -f /etc/ssh/sshd_config ]; then
   exit 1
 fi
 cp -a /etc/ssh/sshd_config /etc/ssh/sshd_config.selfcode-bak
-cp -a /etc/shadow /etc/shadow.selfcode-bak
-echo 'root:selfcode' | chpasswd
-${userPasswdCmd}
 sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/; s/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
 mkdir -p /etc/ssh/sshd_config.d
 printf 'PermitRootLogin yes\\nPasswordAuthentication yes\\n' > /etc/ssh/sshd_config.d/00-selfcode-temp.conf
@@ -349,7 +344,7 @@ sshd_bin="$(command -v sshd 2>/dev/null || true)"
 if [ -n "$sshd_bin" ] && ! (pgrep -x sshd >/dev/null 2>&1 || pidof sshd >/dev/null 2>&1); then
   "$sshd_bin" >/dev/null 2>&1 || true
 fi
-echo "[selfcode] sshd を再起動し、キーリング連携を設定しました"
+echo "[selfcode] sshd を再起動し、キーリング連携を設定しました（ホストのパスワードは変更していません）"
 `;
 }
 
@@ -358,9 +353,6 @@ const SSH_TEMP_OFF_HOST = `
 set -e
 if [ -f /etc/ssh/sshd_config.selfcode-bak ]; then
   mv -f /etc/ssh/sshd_config.selfcode-bak /etc/ssh/sshd_config
-fi
-if [ -f /etc/shadow.selfcode-bak ]; then
-  mv -f /etc/shadow.selfcode-bak /etc/shadow
 fi
 rm -f /etc/ssh/sshd_config.d/00-selfcode-temp.conf
 rm -f /etc/profile.d/00-selfcode-keyring.sh
@@ -438,15 +430,15 @@ async function sshTempGuideOn(target) {
     );
   }
 
-  // ホストPCの場合: キーリングを読み取れる処理を実施した旨と、一般ユーザーおよびrootでの接続案内
+  // ホストPCの場合: パスワードは変更せず、既存パスワードで接続＆キーリングを読み取る案内
   const loginUser = TERM_USER || "user";
   const magicLine = magic
     ? `     Tailscale 利用時はマジックDNS名（ホスト名）でも接続できます:\r\n    例: ssh -L 8080:localhost:8080 ${loginUser}@${magic}\r\n`
     : "";
   return (
     `— 一時SSH: 有効化しました（対象: ホスト）—\r\n` +
-    `  SSH 接続ユーザー: ${loginUser}（または root）\r\n` +
-    `  一時パスワード  : selfcode\r\n` +
+    `  SSH 接続ユーザー: ${loginUser}\r\n` +
+    `  SSH パスワード  : （${loginUser} の現在のログインパスワード）\r\n` +
     `  SSH ポート      : 22\r\n` +
     `  キーリング連携  : 有効（D-Bus / Secret Service 経由でキーリングを読み取ります）\r\n` +
     `\r\n` +
@@ -458,7 +450,7 @@ async function sshTempGuideOn(target) {
     `     ※ ホスト側のキーリングを読み取れる状態で実行され、認証トークンが保存されます\r\n` +
     `  3) 手元PCのブラウザで認証 URL を開いて認証する\r\n` +
     `\r\n` +
-    `認証完了後は「一時SSH」ボタンをもう一度押して OFF にしてください（パスワードと SSH / キーリング設定を元に戻します）。`
+    `認証完了後は「一時SSH」ボタンをもう一度押して OFF にしてください（SSH / キーリング設定を元に戻します）。`
   );
 }
 
