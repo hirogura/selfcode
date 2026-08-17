@@ -838,13 +838,16 @@ const App = (() => {
         else if (msg.type === "state") {
           // 再接続時に実行中のコマンド（freebuff など）を復元する
           pane.running = !!msg.cmd;
+          pane.runningCmd = msg.cmd || "";
           updateFreebuffBtn();
         } else if (msg.type === "exit") {
           pane.term.write("\r\n\x1b[90m[process exited]\x1b[0m\r\n");
           pane.running = false;
+          pane.runningCmd = "";
           updateFreebuffBtn();
         } else if (msg.type === "started") {
           pane.running = true;
+          pane.runningCmd = msg.cmd || "";
           updateFreebuffBtn();
           if (msg.cmd === "freebuff" || msg.cmd === "agy") {
             const label = msg.cmd === "freebuff" ? "freebuff" : "agy (Antigravity CLI)";
@@ -1218,7 +1221,10 @@ const App = (() => {
 
   function updateFreebuffBtn() {
     const p = activePane();
-    $("btn-freebuff").classList.toggle("active", !!(p && p.running));
+    const cmd = p ? p.runningCmd || "" : "";
+    $("btn-freebuff").classList.toggle("active", cmd === "freebuff");
+    $("btn-opencode").classList.toggle("active", cmd === "opencode");
+    $("btn-ag").classList.toggle("active", cmd === "agy");
   }
 
   // 「freebuff」/「opencode」/「agy」起動処理（ツールバーおよび右クリックメニュー共通）
