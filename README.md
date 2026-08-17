@@ -6,7 +6,7 @@ code-server のようにブラウザから使えて、opencodeやFreebuffとの�
 - ファイルツリー / タブ編集 / 保存（Ctrl+S）
 - xterm.js ターミナル（**分割**・**ユーザー切替**・**リフレッシュ**対応）
 - opencode チャットパネル（AI がワークスペース内のファイルを直接編集）
-- **opencode / freebuff** ボタンでターミナルを分割して CLI を起動（未インストールなら確認して自動インストール）
+- **opencode / freebuff / agy (Antigravity CLI)** ボタンでターミナルを分割して CLI を起動（未インストールなら確認して自動インストール）
 - **LXD / Docker コンテナ連携**（コンテナ内のファイル操作・ターミナル）
 - **GitHub 連携**（ユーザー名・トークンの保存、リポジトリのクローン登録、status / fetch / pull / ログ表示）
 - opencode サーバーはバックエンドが自動起動し、`/opencode/*` でプロキシ（認証情報はブラウザに触れない）
@@ -28,7 +28,7 @@ sudo bash /tmp/install-selfcode.sh
 ```
 
 - 既定のインストール先は `/opt/lxd-data/selfcode`（第1引数で変更可: `sudo bash install-selfcode.sh /srv/selfcode`）
-- `opencode` / `freebuff` が未導入の場合は、確認のうえ一緒にインストールします（Enter または `y` で進む）
+- `opencode` / `freebuff` / Antigravity CLI (`agy`) が未導入の場合は、確認のうえ一緒にインストールします（Enter または `y` で進む）
 - systemd サービス `selfcode.service` の登録・自動起動も行います
 - **Tailscale を導入済みなら、確認のうえ `tailscale serve` で Tailnet 内のみに公開**します（完了メッセージにアクセス URL を表示）
 - 確認をすべてスキップするには `-y` を付けて実行: `sudo bash install-selfcode.sh -y`
@@ -50,6 +50,9 @@ curl -fsSL https://opencode.ai/install | bash
 
 # freebuff（npm グローバル）
 sudo npm install -g freebuff
+
+# Antigravity CLI（公式インストーラ。~/.local/bin/agy に導入される）
+curl -fsSL https://antigravity.google/cli/install.sh | bash
 ```
 
 ## 起動
@@ -117,7 +120,7 @@ sudo tailscale serve --bg --https=3339 http://127.0.0.1:3339
 - 右下の **opencodeチャット**（Ctrl+B）に自然言語で指示 → AI がワークスペース内のファイルを直接変更
 - 変更されたファイルはエディタのタブに自動反映（未保存のタブは上書きしません）
 - opencode が権限を求めたら Allow / Deny で応答
-- 右上の **opencode** ボタン / **freebuff** ボタンで、**ターミナルを分割**して新しいペインで各 CLI を起動
+- 右上の **opencode** ボタン / **freebuff** ボタン / **agy** ボタン（Antigravity CLI）で、**ターミナルを分割**して新しいペインで各 CLI を起動
   - CLI が未インストールの場合は `[Y/n]` で確認（Enter または `y` で自動インストールして起動）
 - EXPLORER のフォルダ（またはファイル）を右クリック → **ここで freebuff** で、そのフォルダをワークスペースとして freebuff を起動
 - 下の **ターミナル**（Ctrl+J）で `opencode` CLI などを実行
@@ -165,6 +168,7 @@ sudo rm -rf /opt/lxd-data/selfcode
 # 4. 一緒にインストールした CLI も不要なら削除
 rm -rf ~/.opencode            # opencode（~/.opencode/bin/opencode）
 sudo npm uninstall -g freebuff
+rm -f ~/.local/bin/agy         # Antigravity CLI (agy)
 ```
 
 ## 補足

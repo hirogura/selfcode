@@ -1099,11 +1099,18 @@ let containerCtx = null; // { name, runtime, shell }
 // 含まれないことがあるため、snap 版 lxc なども見つけられるようにする。
 // pathStr を渡すとその PATH で判定する（ターミナルは makeShellEnv の PATH で起動するため、
 // インストール済み判定もそれに合わせる）。
-function findBin(name, pathStr) {
+function findBin(name, pathStr, extraHome) {
   const dirs = (pathStr || process.env.PATH || "").split(":").filter(Boolean);
   const candidates = dirs.map((d) => path.join(d, name));
   if (name === "lxc") candidates.push("/snap/bin/lxc", "/usr/bin/lxc", "/usr/local/bin/lxc");
   if (name === "docker") candidates.push("/usr/bin/docker", "/usr/local/bin/docker", "/snap/bin/docker");
+  // Antigravity CLI (agy) は ~/.local/bin にインストールされる（PATH に無くても検出できるようにしておく。
+  // extraHome = ターミナルの実行ユーザーのホーム。ユーザー切替でインストールされた場所も検出する）
+  if (name === "agy") {
+    const homes = [process.env.HOME || os.homedir(), extraHome].filter(Boolean);
+    for (const h of homes) candidates.push(path.join(h, ".local/bin/agy"));
+    candidates.push("/usr/local/bin/agy", "/usr/bin/agy");
+  }
   for (const c of candidates) {
     try {
       fs.accessSync(c, fs.constants.X_OK);
@@ -1125,6 +1132,8 @@ const INSTALL_CMDS = {
     'export PATH="$HOME/.opencode/bin:$PATH"; curl -fsSL https://opencode.ai/install | bash',
   freebuff:
     'if [ "$(id -u)" = "0" ]; then npm install -g freebuff; else sudo npm install -g freebuff; fi',
+  agy:
+    'export PATH="$HOME/.local/bin:$PATH"; curl -fsSL https://antigravity.google/cli/install.sh | bash',
 };
 
 // コンテナ内でコマンドを実行するための CLI 引数（tty: ターミナル用に疑似端末を割り当てる）
@@ -1458,9 +1467,9 @@ wss.on("connection", (ws, req) => {
       // 保存済みの cwd がコンテナ内に無い場合でもシェルは起動するように cd 失敗は無視する
       // procArgs もシェルエスケープして埋め込む（インストール確認スクリプトの起動用）
       const argStr = procArgs && procArgs.length ? " " + procArgs.map(shq).join(" ") : "";
-      // opencode は ~/.opencode/bin にインストールされるため、コンテナ内の PATH にも追加しておく
-      // （インストール判定と実行で同じ PATH にする）
-      const inner = `${dir ? `cd ${shq(dir)} 2>/dev/null || true; ` : ""}export PATH="$HOME/.opencode/bin:$PATH"; exec ${procCmd}${argStr}`;
+      // opencode は ~/.opencode/bin、Antigravity CLI (agy) は ~/.local/bin にインストールされるため、
+      // コンテナ内の PATH にも追加しておく（インストール判定と実行で同じ PATH にする）
+      const inner = `${dir ? `cd ${shq(dir)} 2>/dev/null || true; ` : ""}export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"; exec ${procCmd}${argStr}`;
       bin = containerBin(containerCtx.runtime);
       args = [...containerExecArgs(containerCtx.runtime, containerCtx.name, true), "sh", "-c", inner];
       cwd = ROOT;
@@ -1474,11 +1483,16 @@ wss.on("connection", (ws, req) => {
         bin = "setpriv";
         args = ["--reuid=" + procUser, "--regid=" + procUser, "--init-groups", "--", procCmd, ...(procArgs || [])];
         cwd = dir;
-        procEnv = { ...procEnv, HOME: userHomeOf(procUser), USER: procUser, LOGNAME: procUser, SHELL: procCmd };
+        const home = userHomeOf(procUser);
+        procEnv = { ...procEnv, HOME: home, USER: procUser, LOGNAME: procUser, SHELL: procCmd };
+        // ~/.local/bin にインストールされる CLI（Antigravity CLI など）を直接起動できるように PATH にも追加する
+        procEnv = { ...procEnv, PATH: `${home}/.local/bin:${procEnv.PATH}` };
       } else {
         bin = procCmd;
         args = procArgs || [];
         cwd = dir;
+        // 同上: 実行ユーザーの ~/.local/bin を PATH に追加（インストール済みの agy などを直接起動できるように）
+        procEnv = { ...procEnv, PATH: `${userHomeOf(curUser)}/.local/bin:${procEnv.PATH}` };
       }
     }
     const child = pty.spawn(bin, args, {
@@ -1540,8 +1554,8 @@ wss.on("connection", (ws, req) => {
       if (INSTALL_CMDS[cmd]) {
         let found = false;
         try {
-          // opencode は ~/.opencode/bin にインストールされるため、インストール判定の PATH にも追加する
-          const { stdout } = await runContainer(["sh", "-c", 'export PATH="$HOME/.opencode/bin:$PATH"; command -v ' + cmd], { timeoutMs: 8000 });
+          // opencode は ~/.opencode/bin、Antigravity CLI (agy) は ~/.local/bin にインストールされるため、インストール判定の PATH にも追加する
+          const { stdout } = await runContainer(["sh", "-c", 'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"; command -v ' + cmd], { timeoutMs: 8000 });
           found = stdout.toString("utf8").trim().length > 0;
         } catch {}
         if (!found) {
@@ -1559,9 +1573,10 @@ wss.on("connection", (ws, req) => {
     const dir = resolveDirRel(target);
     const st = await fsp.stat(dir);
     if (!st.isDirectory()) throw new Error("not a directory");
-    // 未インストールのコマンド（opencode / freebuff）は確認してからインストールする
-    // （判定はターミナルが実際に使う PATH = env.PATH で行う）
-    if (!findBin(cmd, env.PATH) && INSTALL_CMDS[cmd]) {
+    // 未インストールのコマンド（opencode / freebuff / agy）は確認してからインストールする
+    // （判定はターミナルが実際に使う PATH = env.PATH で行う。agy は端末ユーザーの ~/.local/bin も対象）
+    const userHome = rec.user ? userHomeOf(rec.user) : (process.env.HOME || os.homedir());
+    if (!findBin(cmd, env.PATH, userHome) && INSTALL_CMDS[cmd]) {
       spawnInstallFlow(dir, cmd, INSTALL_CMDS[cmd], rec.user);
       rec.cmd = cmd;
       broadcast({ type: "started", cmd, cwd: dir, installing: true });

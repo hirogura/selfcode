@@ -3,7 +3,7 @@
 # selfcode インストールスクリプト
 #
 # GitHub (https://github.com/hirogura/selfcode) からソースを取得して
-# インストールします。opencode / freebuff が未導入の場合は、
+# インストールします。opencode / freebuff / Antigravity CLI (agy) が未導入の場合は、
 # 確認のうえ一緒にインストールします（Enter / "y" がデフォルト）。
 #
 # 使い方:
@@ -114,6 +114,26 @@ elif confirm "freebuff がインストールされていません。一緒にイ
   info "freebuff をインストールしました: $(command -v freebuff)"
 else
   warn "freebuff をスキップします。右上の freebuff ボタンは使用できません。"
+fi
+
+# ---- Antigravity CLI (agy) チェック ----
+if command -v agy >/dev/null 2>&1; then
+  info "Antigravity CLI (agy) は導入済みです: $(command -v agy)"
+else
+  FOUND=""
+  for c in "$HOME/.local/bin/agy" /root/.local/bin/agy /usr/local/bin/agy /usr/bin/agy; do
+    if [ -x "$c" ]; then FOUND="$c"; break; fi
+  done
+  if [ -n "$FOUND" ]; then
+    info "Antigravity CLI (agy) は導入済みです: $FOUND"
+    warn "PATH に無い場合は: export PATH=\"$(dirname "$FOUND"):\$PATH\""
+  elif confirm "Antigravity CLI (agy) がインストールされていません。一緒にインストールしますか？"; then
+    info "Antigravity CLI (agy) をインストール中 (https://antigravity.google/cli/install.sh) ..."
+    curl -fsSL https://antigravity.google/cli/install.sh | bash
+    info "Antigravity CLI (agy) をインストールしました: $HOME/.local/bin/agy"
+  else
+    warn "Antigravity CLI (agy) をスキップします。右上の agy ボタンは使用できません。"
+  fi
 fi
 
 # ---- systemd サービス登録 ----

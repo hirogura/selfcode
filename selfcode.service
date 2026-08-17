@@ -19,7 +19,8 @@ Environment=HOME=/root
 # Environment=SELFCODE_USERNAME=admin
 # Environment=OPENCODE_SERVER_PASSWORD=change-me
 # Environment=OPENCODE_BIN=/root/.opencode/bin/opencode
-Environment=PATH=/root/.opencode/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+# Antigravity CLI (agy) は ~/.local/bin にインストールされるため PATH に追加しておく
+Environment=PATH=/root/.opencode/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
 
 [Install]
 WantedBy=multi-user.target

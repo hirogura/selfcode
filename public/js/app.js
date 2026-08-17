@@ -819,12 +819,13 @@ const App = (() => {
         } else if (msg.type === "started") {
           pane.running = true;
           updateFreebuffBtn();
-          if (msg.cmd === "freebuff") {
+          if (msg.cmd === "freebuff" || msg.cmd === "agy") {
+            const label = msg.cmd === "freebuff" ? "freebuff" : "agy (Antigravity CLI)";
             pane.term.reset();
             pane.term.write(
               msg.installing
-                ? "\r\n\x1b[90m— freebuff が未インストールです。インストールを確認します… —\x1b[0m\r\n"
-                : "\r\n\x1b[90m— freebuff (Ctrl+C で終了、終了後はターミナルに戻ります) —\x1b[0m\r\n"
+                ? "\r\n\x1b[90m— " + label + " が未インストールです。インストールを確認します… —\x1b[0m\r\n"
+                : "\r\n\x1b[90m— " + label + " (Ctrl+C で終了、終了後はターミナルに戻ります) —\x1b[0m\r\n"
             );
             fitPane(pane);
             pane.term.focus();
@@ -1219,6 +1220,10 @@ const App = (() => {
 
   function openOpencodeTerminal() {
     openToolInTerminal("opencode");
+  }
+
+  function openAgTerminal() {
+    openToolInTerminal("agy");
   }
 
   function openTerminalAt(relPath) {
@@ -1691,6 +1696,7 @@ const App = (() => {
     $("btn-chat").onclick = toggleChat;
     $("btn-freebuff").onclick = openFreebuffTerminal;
     $("btn-opencode").onclick = openOpencodeTerminal;
+    $("btn-ag").onclick = openAgTerminal;
     $("btn-term-clear").onclick = () => { const p = activePane(); if (p && p.term) p.term.clear(); };
     $("btn-term-split").onclick = () => splitPane(activePane());
     $("btn-term-refresh").onclick = resetAndCloseTerminal;
