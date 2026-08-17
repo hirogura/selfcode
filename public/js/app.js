@@ -369,7 +369,9 @@ const App = (() => {
       items.push({ label: "リネーム", act: () => rename(target.path, target.dir) });
       items.push({ sep: true });
       items.push({ label: "ここでチャット", act: () => Chat.setDirectory(absDir(target.dir)) });
+      items.push({ label: "ここで opencode", act: () => openOpencodeAt(target.dir) });
       items.push({ label: "ここで freebuff", act: () => openFreebuffAt(target.dir) });
+      items.push({ label: "ここで agy", act: () => openAgyAt(target.dir) });
       items.push({ label: "パスをコピー", act: () => copyPath(target.path) });
       items.push({ sep: true });
       items.push({ label: "アップロード", act: () => uploadFiles(target.dir) });
@@ -381,7 +383,9 @@ const App = (() => {
       items.push({ label: "フォルダ作成", act: () => createFolder(target.path) });
       items.push({ sep: true });
       items.push({ label: "ここでチャット", act: () => Chat.setDirectory(absDir(target.path)) });
+      items.push({ label: "ここで opencode", act: () => openOpencodeAt(target.path) });
       items.push({ label: "ここで freebuff", act: () => openFreebuffAt(target.path) });
+      items.push({ label: "ここで agy", act: () => openAgyAt(target.path) });
       items.push({ label: "パスをコピー", act: () => copyPath(target.path) });
       items.push({ sep: true });
       items.push({ label: "アップロード", act: () => uploadFiles(target.path) });
@@ -404,8 +408,31 @@ const App = (() => {
       menu.appendChild(b);
     }
     menu.style.display = "block";
-    menu.style.left = x + "px";
-    menu.style.top = y + "px";
+    menu.style.visibility = "hidden";
+    menu.style.left = "0px";
+    menu.style.top = "0px";
+
+    const menuRect = menu.getBoundingClientRect();
+    const menuW = menuRect.width;
+    const menuH = menuRect.height;
+    const pad = 8;
+
+    let posX = x;
+    let posY = y;
+
+    // 画面下部ではみ出る場合は上に向けて表示
+    if (y + menuH > window.innerHeight - pad) {
+      posY = Math.max(pad, y - menuH);
+    }
+
+    // 画面右端ではみ出る場合は左側に調整
+    if (posX + menuW > window.innerWidth - pad) {
+      posX = Math.max(pad, window.innerWidth - menuW - pad);
+    }
+
+    menu.style.left = posX + "px";
+    menu.style.top = posY + "px";
+    menu.style.visibility = "visible";
     menu._close = () => closeMenu();
     setTimeout(() => document.addEventListener("click", menu._close, { once: true }), 0);
   }
@@ -1194,10 +1221,11 @@ const App = (() => {
     $("btn-freebuff").classList.toggle("active", !!(p && p.running));
   }
 
-  // 「freebuff」/「opencode」ボタン共通処理
+  // 「freebuff」/「opencode」/「agy」起動処理（ツールバーおよび右クリックメニュー共通）
   // ターミナルウィンドウが開いているときは分割して新しいペインで起動する。
   // 閉じているときは分割せず、最初のサブウィンドウで起動する。
-  function openToolInTerminal(cmd) {
+  // relPath が指定された場合は作業ディレクトリ(cwd)を設定する。
+  function openToolInTerminal(cmd, relPath) {
     const wasHidden = els.terminal.classList.contains("hidden");
     showTerminalPanel();
     const pane = activePane();
@@ -1205,13 +1233,17 @@ const App = (() => {
     if (wasHidden) {
       const first = firstPaneIn(termState.root);
       if (!first) return;
+      if (relPath !== undefined) setPaneCwd(first, relPath);
       if (!first.running) execPane(first, cmd);
       focusPane(first);
       return;
     }
     splitPane(pane); // 分割後は新しいペインがフォーカスされる
     const np = activePane();
-    if (np && !np.running) execPane(np, cmd);
+    if (np) {
+      if (relPath !== undefined) setPaneCwd(np, relPath);
+      if (!np.running) execPane(np, cmd);
+    }
   }
 
   function openFreebuffTerminal() {
@@ -1305,29 +1337,31 @@ const App = (() => {
     fitPane(pane);
   }
 
-  function openTerminalAt(relPath) {
-    showTerminalPanel();
-    const pane = activePane();
-    if (pane) setPaneCwd(pane, relPath);
-  }
-
-  // GitHub パネルの Term ボタン用: ターミナルで開き、エクスプローラもそのフォルダへ移動する。
+  // ターミナルで指定フォルダを開く（右クリックメニューおよび GitHub パネル用）
   // ターミナルが既に開いている場合は分割して新しいペインで開き、閉じている場合は最初のペインを使う。
-  function openFolderAt(relPath) {
+  function openTerminalAt(relPath) {
     const p = relPath || "";
     const wasHidden = els.terminal.classList.contains("hidden");
     showTerminalPanel();
     const pane = activePane();
-    if (pane) {
-      if (wasHidden) {
-        const first = firstPaneIn(termState.root);
-        if (first) setPaneCwd(first, p);
-      } else {
-        splitPane(pane); // 分割後は新しいペインがフォーカスされる
-        const np = activePane();
-        if (np) setPaneCwd(np, p);
+    if (!pane) return;
+    if (wasHidden) {
+      const first = firstPaneIn(termState.root);
+      if (first) {
+        setPaneCwd(first, p);
+        focusPane(first);
       }
+      return;
     }
+    splitPane(pane); // 分割後は新しいペインがフォーカスされる
+    const np = activePane();
+    if (np) setPaneCwd(np, p);
+  }
+
+  // GitHub パネルの Term ボタン用: ターミナルで開き、エクスプローラもそのフォルダへ移動する。
+  function openFolderAt(relPath) {
+    const p = relPath || "";
+    openTerminalAt(p);
     revealInExplorer(p);
   }
 
@@ -1364,15 +1398,21 @@ const App = (() => {
     }, 100);
   }
 
-  // 指定フォルダを cwd として freebuff のチャット TUI を起動する（右クリックメニュー用）
+  // 指定フォルダを cwd として CLI ツール（opencode / freebuff / agy）を起動する（右クリックメニュー用）
+  function openToolAt(cmd, relPath) {
+    openToolInTerminal(cmd, relPath);
+  }
+
   function openFreebuffAt(relPath) {
-    showTerminalPanel();
-    const pane = activePane();
-    if (!pane) return;
-    pane.cwd = relPath || "";
-    setPaneTitle(pane);
-    sendPane(pane, { type: "exec", cmd: "freebuff", cwd: pane.cwd });
-    saveTermState();
+    openToolAt("freebuff", relPath);
+  }
+
+  function openOpencodeAt(relPath) {
+    openToolAt("opencode", relPath);
+  }
+
+  function openAgyAt(relPath) {
+    openToolAt("agy", relPath);
   }
 
   function clamp(v, min, max) {
