@@ -9,6 +9,7 @@ const Chat = (() => {
   let pollTimer = null;
   let pollTick = 0;
   let prevSig = "";
+  let prevSession = null;
   let renderedPerms = new Set();
   let lastErr = 0;
   let directory = "";
@@ -106,6 +107,56 @@ const Chat = (() => {
     return s ? s.title || s.id.slice(0, 12) : "new session";
   }
 
+  // 会話内容（最初のユーザーメッセージ）からセッション名を生成する
+  function deriveTitle(text) {
+    let t = String(text || "").trim();
+    const firstLine = t
+      .split("\n")
+      .map((l) => l.trim())
+      .find((l) => l.length > 0);
+    if (firstLine) t = firstLine;
+    t = t.replace(/^[\s>#*\-–—•・.]+/, "").replace(/\s+/g, " ").trim();
+    const MAX = 30;
+    if (t.length > MAX) t = t.slice(0, MAX).trimEnd() + "…";
+    return t || "new session";
+  }
+
+  // 既定名のまま（自動命名されていない）セッションかどうか
+  function isUnnamed(s) {
+    const t = (s && s.title) || "";
+    return !t || t === "new session" || t === s.id.slice(0, 12);
+  }
+
+  // セッション名をサーバーに保存して一覧へ反映する
+  async function renameSession(id, title) {
+    try {
+      await API.oc.patch("/session/" + encodeURIComponent(id), { title });
+      const s = sessions.find((x) => x.id === id);
+      if (s) {
+        s.title = title;
+        refreshSessionSelect();
+      }
+    } catch (e) {
+      console.error("session rename failed", e);
+    }
+  }
+
+  // セッションが既定名のままなら、最初のユーザーメッセージから自動で名前を付ける
+  function maybeAutoRename(id, msgs) {
+    const sess = sessions.find((x) => x.id === id);
+    if (!sess || !isUnnamed(sess)) return;
+    if (!Array.isArray(msgs)) return;
+    const first = msgs.find((m) => m.info && m.info.role === "user");
+    if (!first) return;
+    const text = (first.parts || [])
+      .filter((p) => p.type === "text")
+      .map((p) => p.text || "")
+      .join(" ")
+      .trim();
+    if (!text) return;
+    renameSession(id, deriveTitle(text));
+  }
+
   async function refreshSessions(selectId) {
     try {
       const all = await API.oc.sessions();
@@ -124,15 +175,14 @@ const Chat = (() => {
     }
   }
 
-  function ensureSession() {
-    if (current) return Promise.resolve(current);
-    return API.oc.createSession(titleOf("new")).then((s) => {
-      current = s.id;
-      refreshSessions(s.id);
-      loadMessages(s.id);
-      saveChatState();
-      return s.id;
-    });
+  async function ensureSession() {
+    if (current) return { id: current, created: false };
+    const s = await API.oc.createSession(titleOf("new"));
+    current = s.id;
+    await refreshSessions(s.id);
+    loadMessages(s.id);
+    saveChatState();
+    return { id: s.id, created: true };
   }
 
   // 選択中のセッションとワークスペースをサーバーに保存する（別のPCから開いても同じセッションに接続できるようにする）
@@ -248,7 +298,7 @@ const Chat = (() => {
     badge.className = "role-badge";
     badge.textContent = role === "user" ? "you" : "assistant";
     const meta = document.createElement("span");
-    const model = info.model ? info.model.id : "";
+    const model = info.model ? info.model.modelID || info.model.id || "" : "";
     meta.textContent = [info.agent, model].filter(Boolean).join(" · ");
     const copyBtn = document.createElement("button");
     copyBtn.className = "copy-btn";
@@ -537,6 +587,7 @@ const Chat = (() => {
       if (Array.isArray(msgs)) {
         for (const m of msgs) upsertMessage(m.info, m.parts);
         scrollBottom();
+        maybeAutoRename(id, msgs);
       }
     } catch (e) {
       if (e.status === 404) heal();
@@ -556,9 +607,12 @@ const Chat = (() => {
       if (!Array.isArray(msgs)) return;
       if (msgs.length && msgs[msgs.length - 1].info && msgs[msgs.length - 1].info.role === "user") removeTemps();
       for (const m of msgs) upsertMessage(m.info, m.parts);
+      maybeAutoRename(current, msgs);
 
+      // ビジー判定: セッションが切り替わった直後は誤判定しない（同一セッション内で内容が変わったときだけ「作業中」にする）
       const sig = sigOf(msgs);
-      const isBusy = sig !== prevSig;
+      const isBusy = current === prevSession ? sig !== prevSig : false;
+      prevSession = current;
       prevSig = sig;
       setBusy(isBusy);
       if (wasBusy && !isBusy) {
@@ -629,10 +683,20 @@ const Chat = (() => {
   async function send() {
     const text = el.input.value.trim();
     if (!text) return;
-    const id = await ensureSession();
+    const { id, created } = await ensureSession();
+    // 新規セッション（または既定名のまま）なら、最初のメッセージからセッション名を自動生成する
+    const sess = sessions.find((x) => x.id === id);
+    if (created || (sess && isUnnamed(sess))) renameSession(id, deriveTitle(text));
     const opts = {};
     if (el.agentSel.value) opts.agent = el.agentSel.value;
-    if (el.modelSel.value) opts.model = el.modelSel.value;
+    // opencode 1.18+ では model は文字列ではなく { providerID, modelID } オブジェクト（または null）を要求する
+    if (el.modelSel.value) {
+      const slash = el.modelSel.value.indexOf("/");
+      opts.model =
+        slash > 0
+          ? { providerID: el.modelSel.value.slice(0, slash), modelID: el.modelSel.value.slice(slash + 1) }
+          : el.modelSel.value;
+    }
     addTempUser(text);
     el.input.value = "";
     el.input.style.height = "auto";

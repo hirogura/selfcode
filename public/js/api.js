@@ -111,7 +111,7 @@ const API = (() => {
       get: (p) => API.get("/opencode" + p, ocHeaders()),
       post: (p, body) => API.post("/opencode" + p, body, ocHeaders()),
       del: (p) => API.del("/opencode" + p, ocHeaders()),
-      patch: (p, body) => API.req("PATCH", "/opencode" + p, body, ocHeaders()),
+      patch: (p, body) => req("PATCH", "/opencode" + p, body, ocHeaders()),
       setDirectory: (d) => {
         ocDir = (d || "").trim().replace(/\/+$/, "") || "/";
       },
