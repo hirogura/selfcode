@@ -95,11 +95,23 @@ else
   done
   if [ -n "$FOUND" ]; then
     info "opencode は導入済みです: $FOUND"
-    warn "PATH に無い場合は: export PATH=\"$(dirname "$FOUND"):\$PATH\""
+    if [ ! -x /usr/local/bin/opencode ] && [ "$FOUND" = "/root/.opencode/bin/opencode" ]; then
+      maybe_sudo cp "$FOUND" /usr/local/bin/opencode 2>/dev/null || cp "$FOUND" /usr/local/bin/opencode 2>/dev/null || true
+      maybe_sudo chmod 755 /usr/local/bin/opencode 2>/dev/null || chmod 755 /usr/local/bin/opencode 2>/dev/null || true
+      info "全ユーザーが利用できるよう /usr/local/bin/opencode にコピーしました"
+    fi
   elif confirm "opencode がインストールされていません。一緒にインストールしますか？"; then
     info "opencode をインストール中 (https://opencode.ai/install) ..."
     curl -fsSL https://opencode.ai/install | bash
-    info "opencode をインストールしました: $HOME/.opencode/bin/opencode"
+    # 全ユーザー（root / 一般ユーザー）で使えるように /usr/local/bin にコピーする
+    for src in "$HOME/.opencode/bin/opencode" /root/.opencode/bin/opencode; do
+      if [ -f "$src" ]; then
+        maybe_sudo cp "$src" /usr/local/bin/opencode 2>/dev/null || cp "$src" /usr/local/bin/opencode 2>/dev/null || true
+        maybe_sudo chmod 755 /usr/local/bin/opencode 2>/dev/null || chmod 755 /usr/local/bin/opencode 2>/dev/null || true
+        break
+      fi
+    done
+    info "opencode をインストールしました: $(command -v opencode || echo "/usr/local/bin/opencode")"
   else
     warn "opencode をスキップします。opencode 連携（チャットパネル）は動作しません。"
   fi
@@ -126,11 +138,23 @@ else
   done
   if [ -n "$FOUND" ]; then
     info "Antigravity CLI (agy) は導入済みです: $FOUND"
-    warn "PATH に無い場合は: export PATH=\"$(dirname "$FOUND"):\$PATH\""
+    if [ ! -x /usr/local/bin/agy ] && [ "$FOUND" = "/root/.local/bin/agy" ]; then
+      maybe_sudo cp "$FOUND" /usr/local/bin/agy 2>/dev/null || cp "$FOUND" /usr/local/bin/agy 2>/dev/null || true
+      maybe_sudo chmod 755 /usr/local/bin/agy 2>/dev/null || chmod 755 /usr/local/bin/agy 2>/dev/null || true
+      info "全ユーザーが利用できるよう /usr/local/bin/agy にコピーしました"
+    fi
   elif confirm "Antigravity CLI (agy) がインストールされていません。一緒にインストールしますか？"; then
     info "Antigravity CLI (agy) をインストール中 (https://antigravity.google/cli/install.sh) ..."
     curl -fsSL https://antigravity.google/cli/install.sh | bash
-    info "Antigravity CLI (agy) をインストールしました: $HOME/.local/bin/agy"
+    # 全ユーザー（root / 一般ユーザー）で使えるように /usr/local/bin にコピーする
+    for src in "$HOME/.local/bin/agy" /root/.local/bin/agy; do
+      if [ -f "$src" ]; then
+        maybe_sudo cp "$src" /usr/local/bin/agy 2>/dev/null || cp "$src" /usr/local/bin/agy 2>/dev/null || true
+        maybe_sudo chmod 755 /usr/local/bin/agy 2>/dev/null || chmod 755 /usr/local/bin/agy 2>/dev/null || true
+        break
+      fi
+    done
+    info "Antigravity CLI (agy) をインストールしました: $(command -v agy || echo "/usr/local/bin/agy")"
   else
     warn "Antigravity CLI (agy) をスキップします。右上の agy ボタンは使用できません。"
   fi

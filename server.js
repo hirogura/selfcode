@@ -1388,11 +1388,11 @@ function containerBin(runtime) {
 // install はシェルスクリプトに埋め込まれるため、単一のコマンドラインで書くこと。
 const INSTALL_CMDS = {
   opencode:
-    'export PATH="$HOME/.opencode/bin:$PATH"; curl -fsSL https://opencode.ai/install | bash',
+    'export PATH="$HOME/.opencode/bin:$PATH"; curl -fsSL https://opencode.ai/install | bash; if [ "$(id -u)" = "0" ] && [ -f /root/.opencode/bin/opencode ]; then cp -f /root/.opencode/bin/opencode /usr/local/bin/opencode 2>/dev/null && chmod 755 /usr/local/bin/opencode 2>/dev/null || true; fi',
   freebuff:
     'if [ "$(id -u)" = "0" ]; then npm install -g freebuff; else sudo npm install -g freebuff; fi',
   agy:
-    'export PATH="$HOME/.local/bin:$PATH"; curl -fsSL https://antigravity.google/cli/install.sh | bash',
+    'export PATH="$HOME/.local/bin:$PATH"; curl -fsSL https://antigravity.google/cli/install.sh | bash; if [ "$(id -u)" = "0" ] && [ -f /root/.local/bin/agy ]; then cp -f /root/.local/bin/agy /usr/local/bin/agy 2>/dev/null && chmod 755 /usr/local/bin/agy 2>/dev/null || true; fi',
 };
 
 // コンテナ内でコマンドを実行するための CLI 引数（tty: ターミナル用に疑似端末を割り当てる）
