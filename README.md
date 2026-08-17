@@ -1,6 +1,6 @@
 # selfcode
 
-code-server のようにブラウザから使えて、opencodeやFreebuffとの連携機能やGitHubとの連携機能がある、セルフホスト型コードエディタです。
+code-server のようにブラウザから使えて、opencodeやFreebuff、Google Antigravityとの連携機能やGitHubとの連携機能がある、セルフホスト型コードエディタです。
 
 - Monaco エディタ（VS Code と同じエディタエンジン）
 - ファイルツリー / タブ編集 / 保存（Ctrl+S）
