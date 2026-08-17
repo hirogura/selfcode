@@ -1226,6 +1226,70 @@ const App = (() => {
     openToolInTerminal("agy");
   }
 
+  let sshTempOn = false; // 「一時SSH」ボタンの状態（/api/ssh-temp と同期）
+
+  // 「一時SSH」ボタン: agy などの OAuth 認証を手元 PC から行えるよう、
+  // 選択中のコンテナ（未選択ならホスト）の SSH パスワード認証・root ログインを一時的に有効化する
+  async function toggleSshTemp() {
+    const next = !sshTempOn;
+    if (next) {
+      const targetLabel = containerInfo ? `コンテナ「${containerInfo.name}」` : "ホスト";
+      const ok = confirm(
+        "「一時SSH」を ON にします。\n\n" +
+          `対象: ${targetLabel}\n` +
+          "・root パスワードを「selfcode」に設定\n" +
+          "・SSH のパスワード認証・root ログインを一時的に有効化\n" +
+          "・sshd を再起動\n\n" +
+          "認証が完了したら、もう一度このボタンを押して OFF にしてください。\n" +
+          "続行しますか？"
+      );
+      if (!ok) return;
+    }
+    try {
+      const result = await postSshTemp(next);
+      // openssh-server が未導入の場合は確認してからインストール付きで再実行する
+      if (result === "need-install") {
+        const ok = confirm(
+          "openssh-server がインストールされていません。\n" +
+            "インストールしてから一時SSHを有効化しますか？（数分かかることがあります）"
+        );
+        if (!ok) {
+          toast("一時SSHは有効化しませんでした");
+          return;
+        }
+        await postSshTemp(next, true);
+      }
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
+
+  // /api/ssh-temp に POST し、結果をボタンとターミナルに反映する
+  async function postSshTemp(on, installSshd) {
+    const r = await fetch("/api/ssh-temp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ on, installSshd: !!installSshd }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (j.needSshdInstall) return "need-install";
+    if (!r.ok) throw new Error(j.error || "一時SSHの切り替えに失敗しました");
+    sshTempOn = !!j.on;
+    $("btn-ssh-temp").classList.toggle("active", sshTempOn);
+    if (j.guide) writeTermMessage(j.guide);
+    else toast(sshTempOn ? "一時SSHを ON にしました" : "一時SSHを OFF にしました（設定を復元）");
+    return "ok";
+  }
+
+  // ターミナルに案内メッセージを表示する（一時SSH の使い方など）
+  function writeTermMessage(text) {
+    showTerminalPanel();
+    const pane = activePane();
+    if (!pane) return;
+    pane.term.write("\r\n\x1b[90m" + String(text).replace(/\r\n/g, "\n").replace(/\n/g, "\r\n") + "\x1b[0m\r\n");
+    fitPane(pane);
+  }
+
   function openTerminalAt(relPath) {
     showTerminalPanel();
     const pane = activePane();
@@ -1697,6 +1761,15 @@ const App = (() => {
     $("btn-freebuff").onclick = openFreebuffTerminal;
     $("btn-opencode").onclick = openOpencodeTerminal;
     $("btn-ag").onclick = openAgTerminal;
+    $("btn-ssh-temp").onclick = toggleSshTemp;
+    // 「一時SSH」ボタンの状態を復元
+    fetch("/api/ssh-temp", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => {
+        sshTempOn = !!j.on;
+        $("btn-ssh-temp").classList.toggle("active", sshTempOn);
+      })
+      .catch(() => {});
     $("btn-term-clear").onclick = () => { const p = activePane(); if (p && p.term) p.term.clear(); };
     $("btn-term-split").onclick = () => splitPane(activePane());
     $("btn-term-refresh").onclick = resetAndCloseTerminal;

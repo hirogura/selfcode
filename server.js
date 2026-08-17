@@ -252,6 +252,161 @@ app.get("/api/status", (req, res) => {
   });
 });
 
+// ================= 一時SSH（agy などの OAuth 認証を手元 PC から行えるようにする） =================
+// 選択中の LXD コンテナ（未選択ならホスト）の sshd に対して、root パスワードの固定と
+// パスワード認証・root ログインの一時有効化を行い、OFF で元に戻す。
+// 状態はサーバー再起動後も保持する（ON のまま再起動しても復元対象を失わないように）。
+const SSH_TEMP_STATE_FILE = process.env.SELFCODE_SSH_STATE || "/opt/lxd-data/note/selfcode-ssh.json";
+let sshTemp = { on: false, target: null }; // target: { type: "container", name } | { type: "host" }
+
+const SSH_TEMP_ON = `
+set -e
+if [ ! -f /etc/ssh/sshd_config ]; then
+  echo "[selfcode] sshd (openssh-server) がインストールされていません" >&2
+  exit 1
+fi
+echo 'root:selfcode' | chpasswd
+cp -a /etc/ssh/sshd_config /etc/ssh/sshd_config.selfcode-bak
+cp -a /etc/shadow /etc/shadow.selfcode-bak
+sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/; s/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+mkdir -p /etc/ssh/sshd_config.d
+printf 'PermitRootLogin yes\nPasswordAuthentication yes\n' > /etc/ssh/sshd_config.d/00-selfcode-temp.conf
+systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || service ssh restart 2>/dev/null || service sshd restart 2>/dev/null || true
+# systemd が無いコンテナ等で再起動できなかった場合も、sshd を直接起動して反映する
+sshd_bin="$(command -v sshd 2>/dev/null || true)"
+if [ -n "$sshd_bin" ] && ! (pgrep -x sshd >/dev/null 2>&1 || pidof sshd >/dev/null 2>&1); then
+  "$sshd_bin" >/dev/null 2>&1 || true
+fi
+echo "[selfcode] sshd を再起動しました"
+`;
+
+const SSH_TEMP_OFF = `
+set -e
+if [ -f /etc/ssh/sshd_config.selfcode-bak ]; then
+  mv -f /etc/ssh/sshd_config.selfcode-bak /etc/ssh/sshd_config
+fi
+if [ -f /etc/shadow.selfcode-bak ]; then
+  mv -f /etc/shadow.selfcode-bak /etc/shadow
+fi
+rm -f /etc/ssh/sshd_config.d/00-selfcode-temp.conf
+systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || service ssh restart 2>/dev/null || service sshd restart 2>/dev/null || true
+echo "[selfcode] SSH 設定を元に戻しました"
+`;
+
+const sshTempTargetLabel = (t) => (t && t.type === "container" ? `コンテナ「${t.name}」` : "ホスト");
+
+async function runSshTempScript(script, target) {
+  if (target.type === "container") {
+    await runContainer(["sh", "-c", script], { timeoutMs: 60000 });
+  } else {
+    await runCmd("sh", ["-c", script], 60000);
+  }
+}
+
+// 対象に sshd（openssh-server）が導入済みか判定する
+async function sshdInstalled(target) {
+  const check = "command -v sshd >/dev/null 2>&1 || test -f /etc/ssh/sshd_config";
+  try {
+    if (target.type === "container") await runContainer(["sh", "-c", check], { timeoutMs: 15000 });
+    else await runCmd("sh", ["-c", check], 15000);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// openssh-server を apt でインストールする（未導入時に y が選ばれた場合）
+async function installOpensshServer(target) {
+  const cmd =
+    'command -v apt-get >/dev/null 2>&1 || { echo "[selfcode] apt-get が見つかりません（Ubuntu/Debian 以外では手動で openssh-server を導入してください）" >&2; exit 1; }; ' +
+    "apt-get update || true; " +
+    "DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server";
+  if (target.type === "container") await runContainer(["sh", "-c", cmd], { timeoutMs: 300000 });
+  else await runCmd("sh", ["-c", cmd], 300000);
+}
+
+// ホストの Tailscale マジックDNS名（tailnet 内のホスト名）を取得する。取得できなければ null
+async function tailscaleMagicDns() {
+  try {
+    const bin = findBin("tailscale") || "tailscale";
+    const out = await runCmd(bin, ["status", "--json"], 8000);
+    const j = JSON.parse(out.toString("utf8"));
+    const name = j && j.Self && j.Self.DNSName ? String(j.Self.DNSName).replace(/\.+$/, "") : "";
+    return name || null;
+  } catch {
+    return null;
+  }
+}
+
+async function sshTempGuideOn(target) {
+  const label = sshTempTargetLabel(target);
+  const magic = await tailscaleMagicDns();
+  const magicLine = magic
+    ? `     Tailscale 利用時はマジックDNS名（ホスト名）でも接続できます:\r\n    例: ssh -L 8080:localhost:8080 root@${magic}\r\n`
+    : "";
+  return (
+    `— 一時SSH: 有効化しました（対象: ${label}）—\r\n` +
+    `  root パスワード : selfcode\r\n` +
+    `  SSH ポート     : 22\r\n` +
+    `\r\n` +
+    `  1) 手元PCのターミナルで、コンテナへ SSH 接続して認証URLのコールバックポートを転送する:\r\n` +
+    `       ssh -L <PORT>:localhost:<PORT> root@<コンテナのIP>\r\n` +
+    `     例: ssh -L 8080:localhost:8080 root@192.168.1.10\r\n` +
+    magicLine +
+    `  2) 接続したら「agy」と入力して認証を開始する（認証 URL が表示される）\r\n` +
+    `  3) 手元PCのブラウザで認証 URL を開いて認証する\r\n` +
+    `\r\n` +
+    `認証完了後は「一時SSH」ボタンをもう一度押して OFF にしてください。\r\n` +
+    `コンテナに直接届かない場合（NAT配下など）は、ホスト側で sshd(22) を lxc config device proxy で転送してください。`
+  );
+}
+
+app.get("/api/ssh-temp", (req, res) => {
+  res.json({
+    on: sshTemp.on,
+    target: sshTemp.target,
+    container: containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null,
+  });
+});
+
+app.post("/api/ssh-temp", async (req, res, next) => {
+  try {
+    const on = !!req.body.on;
+    // 既に同じ状態なら何もしない（ON の再実行でバックアップを上書きしないようにする）
+    if (on === sshTemp.on) {
+      return res.json({ ok: true, on: sshTemp.on, target: sshTemp.target });
+    }
+    const target = on ? (containerCtx ? { type: "container", name: containerCtx.name } : { type: "host" }) : sshTemp.target || (containerCtx ? { type: "container", name: containerCtx.name } : { type: "host" });
+    if (on && target.type === "host" && !IS_ROOT) {
+      return res.status(403).json({ error: "ホスト側の一時SSHには root 権限が必要です" });
+    }
+    if (on) {
+      // openssh-server 未導入なら何も変更せず、インストールするか確認するための応答を返す
+      if (!req.body.installSshd && !(await sshdInstalled(target))) {
+        return res.status(409).json({ error: "openssh-server がインストールされていません", needSshdInstall: true, target });
+      }
+      // y（installSshd）が選ばれたら openssh-server をインストールしてから有効化する
+      if (req.body.installSshd) {
+        await installOpensshServer(target);
+      }
+      await runSshTempScript(SSH_TEMP_ON, target);
+      sshTemp = { on: true, target };
+    } else {
+      await runSshTempScript(SSH_TEMP_OFF, target);
+      sshTemp = { on: false, target: null };
+    }
+    writeStateFile(SSH_TEMP_STATE_FILE, sshTemp).catch(() => {});
+    res.json({ ok: true, on: sshTemp.on, target: sshTemp.target, guide: on ? await sshTempGuideOn(target) : "— 一時SSH: 無効化しました（SSH 設定を元に戻しました）—" });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// サーバー起動時に前回の状態を復元する（ON のまま再起動された場合もボタンと復元対象を維持）
+readStateFile(SSH_TEMP_STATE_FILE, null).then((s) => {
+  if (s && s.on) sshTemp = { on: true, target: s.target || null };
+});
+
 app.get("/api/tree", async (req, res, next) => {
   try {
     const showHidden = req.query.hidden === "1";

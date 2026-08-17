@@ -7,6 +7,7 @@ code-server のようにブラウザから使えて、opencodeやFreebuffとの�
 - xterm.js ターミナル（**分割**・**ユーザー切替**・**リフレッシュ**対応）
 - opencode チャットパネル（AI がワークスペース内のファイルを直接編集）
 - **opencode / freebuff / agy (Antigravity CLI)** ボタンでターミナルを分割して CLI を起動（未インストールなら確認して自動インストール）
+- **一時SSH** ボタンで、agy などの OAuth 認証を手元 PC から行えるよう SSH のパスワード認証・root ログインを一時的に有効化（もう一度押すと解除）
 - **LXD / Docker コンテナ連携**（コンテナ内のファイル操作・ターミナル）
 - **GitHub 連携**（ユーザー名・トークンの保存、リポジトリのクローン登録、status / fetch / pull / ログ表示）
 - opencode サーバーはバックエンドが自動起動し、`/opencode/*` でプロキシ（認証情報はブラウザに触れない）
@@ -122,6 +123,11 @@ sudo tailscale serve --bg --https=3339 http://127.0.0.1:3339
 - opencode が権限を求めたら Allow / Deny で応答
 - 右上の **opencode** ボタン / **freebuff** ボタン / **agy** ボタン（Antigravity CLI）で、**ターミナルを分割**して新しいペインで各 CLI を起動
   - CLI が未インストールの場合は `[Y/n]` で確認（Enter または `y` で自動インストールして起動）
+- 右上の **一時SSH** ボタンで、agy などの OAuth 認証を手元 PC から行えるようにする（トグル）
+  - **ON**: 選択中の LXD コンテナ（未選択ならホスト）の root パスワードを `selfcode` に設定し、SSH のパスワード認証・root ログインを有効化して sshd を再起動
+  - openssh-server が未導入の場合は確認を表示し、`y` で apt から自動インストールしてから有効化
+  - 手元 PC から `ssh -L <ポート>:localhost:<ポート> root@<IP>` でコンテナへポートを転送し、接続したら `agy` と入力して認証 URL を確認、手元 PC のブラウザで認証（Tailscale 利用時はマジックDNS名 `root@<ホスト名>` でも接続可能。手順は ON 時にターミナルへ案内表示）
+  - 認証完了後、もう一度ボタンを押して **OFF** にすると、バックアップした sshd 設定と root パスワードを復元
 - EXPLORER のフォルダ（またはファイル）を右クリック → **ここで freebuff** で、そのフォルダをワークスペースとして freebuff を起動
 - 下の **ターミナル**（Ctrl+J）で `opencode` CLI などを実行
   - **分割**ボタンでペインを分割（フォーカス中のターミナルのフォルダを引き継ぐ）
