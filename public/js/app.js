@@ -1229,20 +1229,35 @@ const App = (() => {
   let sshTempOn = false; // 「一時SSH」ボタンの状態（/api/ssh-temp と同期）
 
   // 「一時SSH」ボタン: agy などの OAuth 認証を手元 PC から行えるよう、
-  // 選択中のコンテナ（未選択ならホスト）の SSH パスワード認証・root ログインを一時的に有効化する
+  // 選択中のコンテナ（未選択ならホスト）の SSH パスワード認証を一時的に有効化する
   async function toggleSshTemp() {
     const next = !sshTempOn;
     if (next) {
-      const targetLabel = containerInfo ? `コンテナ「${containerInfo.name}」` : "ホスト";
-      const ok = confirm(
-        "「一時SSH」を ON にします。\n\n" +
+      const isContainer = !!containerInfo;
+      const targetLabel = isContainer ? `コンテナ「${containerInfo.name}」` : "ホスト";
+      let confirmMsg = "";
+      if (isContainer) {
+        confirmMsg =
+          "「一時SSH」を ON にします。\n\n" +
           `対象: ${targetLabel}\n` +
           "・root パスワードを「selfcode」に設定\n" +
           "・SSH のパスワード認証・root ログインを一時的に有効化\n" +
           "・sshd を再起動\n\n" +
           "認証が完了したら、もう一度このボタンを押して OFF にしてください。\n" +
-          "続行しますか？"
-      );
+          "続行しますか？";
+      } else {
+        const userDesc = termUser && termUser !== "root" ? `ユーザー「${termUser}」および root` : "ユーザーおよび root";
+        confirmMsg =
+          "「一時SSH」を ON にします。\n\n" +
+          `対象: ${targetLabel}\n` +
+          `・${userDesc}のパスワードを「selfcode」に設定\n` +
+          "・SSH のパスワード認証を一時的に有効化\n" +
+          "・キーリング（D-Bus / Secret Service）連携を有効化\n" +
+          "・sshd を再起動\n\n" +
+          "認証が完了したら、もう一度このボタンを押して OFF にしてください。\n" +
+          "続行しますか？";
+      }
+      const ok = confirm(confirmMsg);
       if (!ok) return;
     }
     try {

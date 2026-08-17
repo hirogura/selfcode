@@ -66,6 +66,21 @@ function userHomeOf(name) {
   return "/home/" + name;
 }
 
+// 指定ユーザーの uid を /etc/passwd から引く（D-Bus や XDG_RUNTIME_DIR の特定用）
+function userUidOf(name) {
+  try {
+    const passwd = fs.readFileSync("/etc/passwd", "utf8");
+    for (const line of passwd.split("\n")) {
+      const parts = line.split(":");
+      if (parts.length >= 3 && parts[0] === name) {
+        const uid = Number(parts[2]);
+        if (Number.isFinite(uid)) return uid;
+      }
+    }
+  } catch {}
+  return 1000;
+}
+
 // code-server と同じ挙動にする：HOME が未設定（systemd 起動時など）なら os.homedir() で補完し、
 // ホームディレクトリ自体が存在しない場合（極小コンテナ等）は mkdir -p で作成する。
 // プロセス全体の環境に設定しておくことで、ターミナルと opencode の両方に HOME が渡る。
@@ -253,13 +268,15 @@ app.get("/api/status", (req, res) => {
 });
 
 // ================= 一時SSH（agy などの OAuth 認証を手元 PC から行えるようにする） =================
-// 選択中の LXD コンテナ（未選択ならホスト）の sshd に対して、root パスワードの固定と
+// 選択中の LXD コンテナ（未選択ならホスト）の sshd に対して、一時パスワードの設定と
 // パスワード認証・root ログインの一時有効化を行い、OFF で元に戻す。
+// ホストPCの場合はキーリング（D-Bus / Secret Service）を読み取れる環境変数設定も行う。
 // 状態はサーバー再起動後も保持する（ON のまま再起動しても復元対象を失わないように）。
 const SSH_TEMP_STATE_FILE = process.env.SELFCODE_SSH_STATE || "/opt/lxd-data/note/selfcode-ssh.json";
 let sshTemp = { on: false, target: null }; // target: { type: "container", name } | { type: "host" }
 
-const SSH_TEMP_ON = `
+// コンテナ内用の一時SSH有効化スクリプト（コンテナ内は既存動作のまま）
+const SSH_TEMP_ON_CONTAINER = `
 set -e
 if [ ! -f /etc/ssh/sshd_config ]; then
   echo "[selfcode] sshd (openssh-server) がインストールされていません" >&2
@@ -270,7 +287,7 @@ cp -a /etc/ssh/sshd_config /etc/ssh/sshd_config.selfcode-bak
 cp -a /etc/shadow /etc/shadow.selfcode-bak
 sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/; s/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
 mkdir -p /etc/ssh/sshd_config.d
-printf 'PermitRootLogin yes\nPasswordAuthentication yes\n' > /etc/ssh/sshd_config.d/00-selfcode-temp.conf
+printf 'PermitRootLogin yes\\nPasswordAuthentication yes\\n' > /etc/ssh/sshd_config.d/00-selfcode-temp.conf
 systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || service ssh restart 2>/dev/null || service sshd restart 2>/dev/null || true
 # systemd が無いコンテナ等で再起動できなかった場合も、sshd を直接起動して反映する
 sshd_bin="$(command -v sshd 2>/dev/null || true)"
@@ -280,7 +297,8 @@ fi
 echo "[selfcode] sshd を再起動しました"
 `;
 
-const SSH_TEMP_OFF = `
+// コンテナ内用の一時SSH無効化スクリプト
+const SSH_TEMP_OFF_CONTAINER = `
 set -e
 if [ -f /etc/ssh/sshd_config.selfcode-bak ]; then
   mv -f /etc/ssh/sshd_config.selfcode-bak /etc/ssh/sshd_config
@@ -291,6 +309,63 @@ fi
 rm -f /etc/ssh/sshd_config.d/00-selfcode-temp.conf
 systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || service ssh restart 2>/dev/null || service sshd restart 2>/dev/null || true
 echo "[selfcode] SSH 設定を元に戻しました"
+`;
+
+// ホストPC用の一時SSH有効化スクリプト（キーリング連携設定を含む）
+function getSshTempOnHostScript() {
+  const user = TERM_USER;
+  const userPasswdCmd = user && user !== "root" ? `echo '${user}:selfcode' | chpasswd` : "";
+  return `
+set -e
+if [ ! -f /etc/ssh/sshd_config ]; then
+  echo "[selfcode] sshd (openssh-server) がインストールされていません" >&2
+  exit 1
+fi
+cp -a /etc/ssh/sshd_config /etc/ssh/sshd_config.selfcode-bak
+cp -a /etc/shadow /etc/shadow.selfcode-bak
+echo 'root:selfcode' | chpasswd
+${userPasswdCmd}
+sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/; s/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+mkdir -p /etc/ssh/sshd_config.d
+printf 'PermitRootLogin yes\\nPasswordAuthentication yes\\n' > /etc/ssh/sshd_config.d/00-selfcode-temp.conf
+# SSH ログイン時に対話シェル等で D-Bus / Secret Service キーリングを読み取れるよう profile.d に設定
+mkdir -p /etc/profile.d
+cat << 'EOF' > /etc/profile.d/00-selfcode-keyring.sh
+# selfcode: SSH セッション等でユーザーの D-Bus / キーリング（Secret Service）を読み取れるようにする
+_uid="$(id -u)"
+if [ -d "/run/user/$_uid" ]; then
+  [ -z "$XDG_RUNTIME_DIR" ] && export XDG_RUNTIME_DIR="/run/user/$_uid"
+  [ -z "$DBUS_SESSION_BUS_ADDRESS" ] && [ -S "/run/user/$_uid/bus" ] && export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$_uid/bus"
+  [ -z "$GNOME_KEYRING_CONTROL" ] && [ -d "/run/user/$_uid/keyring" ] && export GNOME_KEYRING_CONTROL="/run/user/$_uid/keyring"
+fi
+if [ -z "$DBUS_SESSION_BUS_ADDRESS" ] && command -v dbus-launch >/dev/null 2>&1; then
+  eval $(dbus-launch --sh-syntax 2>/dev/null || true)
+fi
+unset _uid
+EOF
+chmod 644 /etc/profile.d/00-selfcode-keyring.sh
+systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || service ssh restart 2>/dev/null || service sshd restart 2>/dev/null || true
+sshd_bin="$(command -v sshd 2>/dev/null || true)"
+if [ -n "$sshd_bin" ] && ! (pgrep -x sshd >/dev/null 2>&1 || pidof sshd >/dev/null 2>&1); then
+  "$sshd_bin" >/dev/null 2>&1 || true
+fi
+echo "[selfcode] sshd を再起動し、キーリング連携を設定しました"
+`;
+}
+
+// ホストPC用の一時SSH無効化スクリプト
+const SSH_TEMP_OFF_HOST = `
+set -e
+if [ -f /etc/ssh/sshd_config.selfcode-bak ]; then
+  mv -f /etc/ssh/sshd_config.selfcode-bak /etc/ssh/sshd_config
+fi
+if [ -f /etc/shadow.selfcode-bak ]; then
+  mv -f /etc/shadow.selfcode-bak /etc/shadow
+fi
+rm -f /etc/ssh/sshd_config.d/00-selfcode-temp.conf
+rm -f /etc/profile.d/00-selfcode-keyring.sh
+systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || service ssh restart 2>/dev/null || service sshd restart 2>/dev/null || true
+echo "[selfcode] SSH 設定およびキーリング連携設定を元に戻しました"
 `;
 
 const sshTempTargetLabel = (t) => (t && t.type === "container" ? `コンテナ「${t.name}」` : "ホスト");
@@ -331,7 +406,7 @@ async function tailscaleMagicDns() {
     const bin = findBin("tailscale") || "tailscale";
     const out = await runCmd(bin, ["status", "--json"], 8000);
     const j = JSON.parse(out.toString("utf8"));
-    const name = j && j.Self && j.Self.DNSName ? String(j.Self.DNSName).replace(/\.+$/, "") : "";
+    const name = j && j.Self && j.Self.DNSName ? String(j.Self.DNSName).replace(/\\.+$/, "") : "";
     return name || null;
   } catch {
     return null;
@@ -339,25 +414,51 @@ async function tailscaleMagicDns() {
 }
 
 async function sshTempGuideOn(target) {
-  const label = sshTempTargetLabel(target);
+  const isContainer = target && target.type === "container";
   const magic = await tailscaleMagicDns();
+  if (isContainer) {
+    const label = `コンテナ「${target.name}」`;
+    const magicLine = magic
+      ? `     Tailscale 利用時はマジックDNS名（ホスト名）でも接続できます:\r\n    例: ssh -L 8080:localhost:8080 root@${magic}\r\n`
+      : "";
+    return (
+      `— 一時SSH: 有効化しました（対象: ${label}）—\r\n` +
+      `  root パスワード : selfcode\r\n` +
+      `  SSH ポート     : 22\r\n` +
+      `\r\n` +
+      `  1) 手元PCのターミナルで、コンテナへ SSH 接続して認証URLのコールバックポートを転送する:\r\n` +
+      `       ssh -L <PORT>:localhost:<PORT> root@<コンテナのIP>\r\n` +
+      `     例: ssh -L 8080:localhost:8080 root@192.168.1.10\r\n` +
+      magicLine +
+      `  2) 接続したら「agy」と入力して認証を開始する（認証 URL が表示される）\r\n` +
+      `  3) 手元PCのブラウザで認証 URL を開いて認証する\r\n` +
+      `\r\n` +
+      `認証完了後は「一時SSH」ボタンをもう一度押して OFF にしてください。\r\n` +
+      `コンテナに直接届かない場合（NAT配下など）は、ホスト側で sshd(22) を lxc config device proxy で転送してください。`
+    );
+  }
+
+  // ホストPCの場合: キーリングを読み取れる処理を実施した旨と、一般ユーザーおよびrootでの接続案内
+  const loginUser = TERM_USER || "user";
   const magicLine = magic
-    ? `     Tailscale 利用時はマジックDNS名（ホスト名）でも接続できます:\r\n    例: ssh -L 8080:localhost:8080 root@${magic}\r\n`
+    ? `     Tailscale 利用時はマジックDNS名（ホスト名）でも接続できます:\r\n    例: ssh -L 8080:localhost:8080 ${loginUser}@${magic}\r\n`
     : "";
   return (
-    `— 一時SSH: 有効化しました（対象: ${label}）—\r\n` +
-    `  root パスワード : selfcode\r\n` +
-    `  SSH ポート     : 22\r\n` +
+    `— 一時SSH: 有効化しました（対象: ホスト）—\r\n` +
+    `  SSH 接続ユーザー: ${loginUser}（または root）\r\n` +
+    `  一時パスワード  : selfcode\r\n` +
+    `  SSH ポート      : 22\r\n` +
+    `  キーリング連携  : 有効（D-Bus / Secret Service 経由でキーリングを読み取ります）\r\n` +
     `\r\n` +
-    `  1) 手元PCのターミナルで、コンテナへ SSH 接続して認証URLのコールバックポートを転送する:\r\n` +
-    `       ssh -L <PORT>:localhost:<PORT> root@<コンテナのIP>\r\n` +
-    `     例: ssh -L 8080:localhost:8080 root@192.168.1.10\r\n` +
+    `  1) 手元PCのターミナルで、ホストへ SSH 接続して認証URLのコールバックポートを転送する:\r\n` +
+    `       ssh -L <PORT>:localhost:<PORT> ${loginUser}@<ホストのIP>\r\n` +
+    `     例: ssh -L 8080:localhost:8080 ${loginUser}@192.168.1.10\r\n` +
     magicLine +
-    `  2) 接続したら「agy」と入力して認証を開始する（認証 URL が表示される）\r\n` +
+    `  2) 接続したら「agy」と入力して認証を開始する（認証 URL が表示されます）\r\n` +
+    `     ※ ホスト側のキーリングを読み取れる状態で実行され、認証トークンが保存されます\r\n` +
     `  3) 手元PCのブラウザで認証 URL を開いて認証する\r\n` +
     `\r\n` +
-    `認証完了後は「一時SSH」ボタンをもう一度押して OFF にしてください。\r\n` +
-    `コンテナに直接届かない場合（NAT配下など）は、ホスト側で sshd(22) を lxc config device proxy で転送してください。`
+    `認証完了後は「一時SSH」ボタンをもう一度押して OFF にしてください（パスワードと SSH / キーリング設定を元に戻します）。`
   );
 }
 
@@ -366,6 +467,7 @@ app.get("/api/ssh-temp", (req, res) => {
     on: sshTemp.on,
     target: sshTemp.target,
     container: containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null,
+    termUser: TERM_USER,
   });
 });
 
@@ -389,10 +491,12 @@ app.post("/api/ssh-temp", async (req, res, next) => {
       if (req.body.installSshd) {
         await installOpensshServer(target);
       }
-      await runSshTempScript(SSH_TEMP_ON, target);
+      const script = target.type === "container" ? SSH_TEMP_ON_CONTAINER : getSshTempOnHostScript();
+      await runSshTempScript(script, target);
       sshTemp = { on: true, target };
     } else {
-      await runSshTempScript(SSH_TEMP_OFF, target);
+      const script = target.type === "container" ? SSH_TEMP_OFF_CONTAINER : SSH_TEMP_OFF_HOST;
+      await runSshTempScript(script, target);
       sshTemp = { on: false, target: null };
     }
     writeStateFile(SSH_TEMP_STATE_FILE, sshTemp).catch(() => {});
@@ -1630,6 +1734,20 @@ wss.on("connection", (ws, req) => {
       cwd = ROOT;
     } else {
       const curUser = process.env.USER || (os.userInfo && os.userInfo().username) || "root";
+      const targetUser = (procUser && procUser !== curUser) ? procUser : curUser;
+      const uid = userUidOf(targetUser);
+      const runUserDir = `/run/user/${uid}`;
+      const keyringEnv = {};
+      if (fs.existsSync(runUserDir)) {
+        keyringEnv.XDG_RUNTIME_DIR = runUserDir;
+        if (fs.existsSync(`${runUserDir}/bus`)) {
+          keyringEnv.DBUS_SESSION_BUS_ADDRESS = `unix:path=${runUserDir}/bus`;
+        }
+        if (fs.existsSync(`${runUserDir}/keyring`)) {
+          keyringEnv.GNOME_KEYRING_CONTROL = `${runUserDir}/keyring`;
+        }
+      }
+
       if (procUser && procUser !== curUser) {
         // 別ユーザーでシェルを起動する（root から一般ユーザーへの切り替えのみ可能）。
         // su -c だと bash が端末のプロセスグループを設定できずジョブ制御が無効になるため、
@@ -1639,7 +1757,7 @@ wss.on("connection", (ws, req) => {
         args = ["--reuid=" + procUser, "--regid=" + procUser, "--init-groups", "--", procCmd, ...(procArgs || [])];
         cwd = dir;
         const home = userHomeOf(procUser);
-        procEnv = { ...procEnv, HOME: home, USER: procUser, LOGNAME: procUser, SHELL: procCmd };
+        procEnv = { ...procEnv, ...keyringEnv, HOME: home, USER: procUser, LOGNAME: procUser, SHELL: procCmd };
         // ~/.local/bin にインストールされる CLI（Antigravity CLI など）を直接起動できるように PATH にも追加する
         procEnv = { ...procEnv, PATH: `${home}/.local/bin:${procEnv.PATH}` };
       } else {
@@ -1647,7 +1765,7 @@ wss.on("connection", (ws, req) => {
         args = procArgs || [];
         cwd = dir;
         // 同上: 実行ユーザーの ~/.local/bin を PATH に追加（インストール済みの agy などを直接起動できるように）
-        procEnv = { ...procEnv, PATH: `${userHomeOf(curUser)}/.local/bin:${procEnv.PATH}` };
+        procEnv = { ...procEnv, ...keyringEnv, PATH: `${userHomeOf(curUser)}/.local/bin:${procEnv.PATH}` };
       }
     }
     const child = pty.spawn(bin, args, {
