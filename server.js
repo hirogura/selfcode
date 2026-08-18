@@ -1858,7 +1858,10 @@ wss.on("connection", (ws, req) => {
       broadcast({ type: "started", cmd, cwd: dir, installing: true });
       return;
     }
-    spawnTermProc(dir, cmd, [], rec.user);
+    // シェル経由で起動して、シェルの初始化（profile 読み込み・PATH 設定）を行う。
+    // これにより、opencode の内部シェルも正しく動作する。
+    const userShell = process.env.SHELL || (fs.existsSync("/bin/bash") ? "/bin/bash" : "/bin/sh");
+    spawnTermProc(dir, userShell, ["-l", "-c", cmd], rec.user);
     rec.cmd = cmd;
     broadcast({ type: "started", cmd, cwd: dir });
   }
