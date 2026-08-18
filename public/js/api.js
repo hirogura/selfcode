@@ -153,6 +153,16 @@ const API = (() => {
       async pendingPermissions() {
         return this.get("/permission");
       },
+      // opencode の question ツール（AI からの選択肢つき質問）
+      async questions() {
+        return this.get("/question");
+      },
+      async replyQuestion(requestID, answers) {
+        return this.post("/question/" + encodeURIComponent(requestID) + "/reply", { answers });
+      },
+      async rejectQuestion(requestID) {
+        return this.post("/question/" + encodeURIComponent(requestID) + "/reject", {});
+      },
     },
   };
 })();

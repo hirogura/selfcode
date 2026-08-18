@@ -15,6 +15,9 @@ const Chat = (() => {
   let directory = "";
   let healing = false;
   let workingEl = null;
+  let pendingQuestions = []; // opencode の保留中の質問（question ツール）
+  let questionMap = new Map(); // "messageID:callID" -> QuestionRequest
+  let questionsApiOk = true; // 古い opencode には /question が無いため最初の 404 で無効化
 
   const el = {
     status: $("oc-status"),
@@ -254,6 +257,8 @@ const Chat = (() => {
     workingEl = null;
     order = [];
     renderedPerms = new Set();
+    questionMap.clear();
+    pendingQuestions = [];
     window.__pv = window.__pv || new Map();
     for (const k of Array.from(window.__pv.keys())) window.__pv.delete(k);
   }
@@ -339,6 +344,15 @@ const Chat = (() => {
     if (parts) {
       for (const p of parts) upsertPart(p, wrap, store);
     }
+    // サーバー側のユーザーメッセージが表示されたら、同じ内容の一時メッセージ（重複表示）を削除する
+    if (info.role === "user" && parts) {
+      const txt = parts
+        .filter((p) => p.type === "text")
+        .map((p) => p.text || "")
+        .join(" ")
+        .trim();
+      if (txt) removeTempByText(txt);
+    }
     if (isNew) scrollBottom();
   }
 
@@ -381,6 +395,22 @@ const Chat = (() => {
         if (store.get(k).el.closest(".msg.temp")) store.delete(k);
       }
       m.remove();
+    });
+  }
+
+  // サーバー側に同じ内容のユーザーメッセージが表示されたら、送信時の楽観表示（一時メッセージ）を削除する
+  function removeTempByText(text) {
+    const store = partStore();
+    const needle = String(text || "").trim();
+    if (!needle) return;
+    document.querySelectorAll(".msg.temp").forEach((m) => {
+      const bubble = m.querySelector(".bubble");
+      if (bubble && String(bubble.textContent || "").trim() === needle) {
+        for (const k of Array.from(store.keys())) {
+          if (store.get(k).el.closest(".msg.temp")) store.delete(k);
+        }
+        m.remove();
+      }
     });
   }
 
@@ -436,6 +466,177 @@ const Chat = (() => {
         out.className = "tool-output";
         out.classList.add("hidden");
         el.append(head, out);
+
+        // question ツール（AI からの選択肢つき質問）: 質問文と回答 UI を描画する
+        let qBody = null;
+        let qState = []; // 質問ごとの選択状態 { selected:Set, custom:string, customOpen:bool }
+        let qLastKey = "";
+        let qRequestID = null;
+        let qSendBtn = null;
+        let qRejectBtn = null;
+        let qSubmitting = false;
+
+        function qAnswerOf(qi) {
+          const st = qState[qi];
+          const list = Array.from(st.selected);
+          if (st.custom) list.push(st.custom);
+          return list;
+        }
+
+        // 選択状態に合わせてチェックマーク等を更新する（回答 UI を再構築しない）
+        function qSync(q, qi) {
+          const item = qBody.children[qi];
+          if (!item) return;
+          const st = qState[qi];
+          const opts = q.options || [];
+          item.querySelectorAll(".q-opt").forEach((row, ri) => {
+            const mark = row.querySelector(".q-mark");
+            if (ri < opts.length) {
+              const on = st.selected.has(opts[ri].label);
+              row.classList.toggle("on", on);
+              mark.textContent = on ? (q.multiple ? "☑" : "●") : (q.multiple ? "☐" : "○");
+            } else {
+              const on = !!st.custom;
+              row.classList.toggle("on", on);
+              mark.textContent = on ? (q.multiple ? "☑" : "●") : (q.multiple ? "☐" : "○");
+            }
+          });
+          const wrap = item.querySelector(".q-custom-wrap");
+          if (wrap) wrap.classList.toggle("hidden", !(st.customOpen || st.custom));
+        }
+
+        function qBuild(p) {
+          const st = p.state || {};
+          const questions = st.input && Array.isArray(st.input.questions) ? st.input.questions : [];
+          const key = JSON.stringify(questions);
+          if (!qBody) {
+            qBody = document.createElement("div");
+            qBody.className = "question-box";
+            el.insertBefore(qBody, out);
+          }
+          if (key === qLastKey) return;
+          qLastKey = key;
+          qState = questions.map(() => ({ selected: new Set(), custom: "", customOpen: false }));
+          qBody.innerHTML = "";
+          questions.forEach((q, qi) => {
+            const item = document.createElement("div");
+            item.className = "question-item";
+            const text = document.createElement("div");
+            text.className = "question-text";
+            text.textContent = (q.header ? "[" + q.header + "] " : "") + (q.question || "");
+            const opts = document.createElement("div");
+            opts.className = "question-options";
+            (q.options || []).forEach((o) => {
+              const row = document.createElement("div");
+              row.className = "q-opt";
+              const mark = document.createElement("span");
+              mark.className = "q-mark";
+              const lbl = document.createElement("span");
+              lbl.className = "q-label";
+              lbl.textContent = o.label;
+              row.append(mark, lbl);
+              row.onclick = () => {
+                const s = qState[qi].selected;
+                if (q.multiple) {
+                  if (s.has(o.label)) s.delete(o.label);
+                  else s.add(o.label);
+                } else {
+                  s.clear();
+                  s.add(o.label);
+                  qState[qi].custom = "";
+                  qState[qi].customOpen = false;
+                }
+                qSync(q, qi);
+              };
+              const desc = document.createElement("div");
+              desc.className = "q-desc";
+              desc.textContent = o.description || "";
+              opts.append(row, desc);
+            });
+            if (q.custom !== false) {
+              const row = document.createElement("div");
+              row.className = "q-opt";
+              const mark = document.createElement("span");
+              mark.className = "q-mark";
+              const lbl = document.createElement("span");
+              lbl.className = "q-label";
+              lbl.textContent = "その他（自由入力）";
+              row.append(mark, lbl);
+              row.onclick = () => {
+                const s = qState[qi];
+                if (!q.multiple) {
+                  s.selected.clear();
+                  s.custom = "";
+                }
+                s.customOpen = !s.customOpen;
+                qSync(q, qi);
+                if (s.customOpen) {
+                  const inp = item.querySelector(".q-custom-input");
+                  if (inp) inp.focus();
+                }
+              };
+              const wrap = document.createElement("div");
+              wrap.className = "q-custom-wrap hidden";
+              const inp = document.createElement("input");
+              inp.type = "text";
+              inp.className = "q-custom-input";
+              inp.placeholder = "自由入力…";
+              inp.addEventListener("input", () => {
+                qState[qi].custom = inp.value.trim();
+                qSync(q, qi);
+              });
+              wrap.appendChild(inp);
+              opts.append(row, wrap);
+            }
+            item.append(text, opts);
+            qBody.appendChild(item);
+          });
+          const actions = document.createElement("div");
+          actions.className = "question-actions";
+          qSendBtn = document.createElement("button");
+          qSendBtn.type = "button";
+          qSendBtn.className = "btn small primary";
+          qSendBtn.textContent = "回答する";
+          qSendBtn.onclick = () => {
+            if (qSubmitting) return;
+            qSubmitting = true;
+            qSendBtn.disabled = true;
+            qRejectBtn.disabled = true;
+            const answers = qState.map((_, i) => qAnswerOf(i));
+            API.oc
+              .replyQuestion(qRequestID, answers)
+              .then(() => toast("回答を送信しました"))
+              .catch((e) => {
+                qSubmitting = false;
+                qSendBtn.disabled = false;
+                qRejectBtn.disabled = false;
+                toast("回答の送信に失敗しました: " + e.message, true);
+              });
+          };
+          qRejectBtn = document.createElement("button");
+          qRejectBtn.type = "button";
+          qRejectBtn.className = "btn small danger";
+          qRejectBtn.textContent = "却下";
+          qRejectBtn.onclick = () => {
+            if (qSubmitting) return;
+            qSubmitting = true;
+            qSendBtn.disabled = true;
+            qRejectBtn.disabled = true;
+            API.oc
+              .rejectQuestion(qRequestID)
+              .then(() => toast("質問を却下しました"))
+              .catch((e) => {
+                qSubmitting = false;
+                qSendBtn.disabled = false;
+                qRejectBtn.disabled = false;
+                toast("却下に失敗しました: " + e.message, true);
+              });
+          };
+          actions.append(qSendBtn, qRejectBtn);
+          qBody.appendChild(actions);
+          questions.forEach((q, qi) => qSync(q, qi));
+        }
+
         return {
           el,
           update: (p) => {
@@ -453,6 +654,14 @@ const Chat = (() => {
             } else {
               out.textContent = "";
               out.classList.add("hidden");
+            }
+            if (p.tool === "question") {
+              const req = questionMap.get((p.messageID || "") + ":" + (p.callID || ""));
+              if (req && req.id) qRequestID = req.id;
+              qBuild(p);
+              const running = !st.status || st.status === "running" || st.status === "pending";
+              if (qSendBtn) qSendBtn.disabled = qSubmitting || !(running && qRequestID);
+              if (qRejectBtn) qRejectBtn.disabled = qSubmitting || !(running && qRequestID);
             }
           },
         };
@@ -645,6 +854,25 @@ const Chat = (() => {
       }
     } catch (e) {
       /* noop */
+    }
+
+    // 保留中の質問（question ツール）を取得し、ツールパーツから回答できるようにする
+    // 古い opencode には /question が無いため、404/405 が返ったら以後は取得しない
+    try {
+      if (questionsApiOk) {
+        const qs = await API.oc.questions();
+        if (Array.isArray(qs)) {
+          pendingQuestions = qs.filter((q) => q && q.sessionID === current);
+          questionMap.clear();
+          for (const q of pendingQuestions) {
+            if (q.tool && q.tool.messageID && q.tool.callID) {
+              questionMap.set(q.tool.messageID + ":" + q.tool.callID, q);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      if (e.status === 404 || e.status === 405) questionsApiOk = false;
     }
   }
 

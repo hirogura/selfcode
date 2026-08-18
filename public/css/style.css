@@ -379,6 +379,23 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
 .permission-card .perm-meta { color: var(--fg-dim); margin-bottom: 8px; word-break: break-all; }
 .permission-card .perm-actions { display: flex; gap: 6px; }
 
+/* opencode question ツール（AI からの選択肢つき質問） */
+.question-box { margin-top: 6px; border-top: 1px dashed var(--border); padding-top: 6px; }
+.question-item + .question-item { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.question-text { font-weight: 600; margin-bottom: 4px; white-space: pre-wrap; word-break: break-word; }
+.question-options { display: flex; flex-direction: column; }
+.q-opt { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 4px; cursor: pointer; user-select: none; }
+.q-opt:hover { background: var(--bg-3); }
+.q-opt.on { background: rgba(63, 185, 80, 0.12); }
+.q-opt .q-mark { width: 16px; flex: 0 0 auto; color: var(--fg-dim); font-family: var(--mono); }
+.q-opt.on .q-mark { color: var(--green); }
+.q-opt .q-label { color: var(--fg); }
+.q-desc { color: var(--fg-dim); font-size: 11px; padding: 0 0 4px 28px; white-space: pre-wrap; word-break: break-word; }
+.q-custom-wrap { padding: 2px 6px 6px 28px; }
+.q-custom-wrap input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; color: var(--fg); outline: none; }
+.q-custom-wrap input:focus { border-color: var(--accent-2); }
+.question-actions { display: flex; gap: 6px; margin-top: 8px; }
+
 .error-line { color: var(--red); font-size: 12px; white-space: pre-wrap; word-break: break-word; }
 
 .chat-input-wrap { border-top: 1px solid var(--border); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
