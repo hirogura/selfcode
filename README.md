@@ -22,8 +22,7 @@ code-server のようにブラウザから使えて、opencodeやFreebuff、Goog
 ### 自動インストール（推奨）
 
 ```bash
-# 必要に応じて先にインストール:
-#   sudo apt-get install -y git curl nodejs npm
+sudo apt install -y git curl nodejs npm
 curl -fsSL https://raw.githubusercontent.com/hirogura/selfcode/main/install-selfcode.sh -o /tmp/install-selfcode.sh
 sudo bash /tmp/install-selfcode.sh
 ```
