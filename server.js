@@ -1381,8 +1381,19 @@ function containerBin(runtime) {
 const INSTALL_CMDS = {
   opencode:
     'export PATH="$HOME/.opencode/bin:$PATH"; curl -fsSL https://opencode.ai/install | bash; if [ "$(id -u)" = "0" ] && [ -f /root/.opencode/bin/opencode ]; then cp -f /root/.opencode/bin/opencode /usr/local/bin/opencode 2>/dev/null && chmod 755 /usr/local/bin/opencode 2>/dev/null || true; fi',
+  // freebuff は npm グローバルインストール。npm / node が無い環境（LXD コンテナ等）でも
+  // パッケージマネージャ（apt / apk / dnf / yum）から nodejs / npm を自動インストールしてから進める。
+  // freebuff CLI は Node.js 18+ 必須のため、バージョンも確認する。
   freebuff:
-    'if [ "$(id -u)" = "0" ]; then npm install -g freebuff; else sudo npm install -g freebuff; fi',
+    "if ! command -v npm >/dev/null 2>&1; then echo '[selfcode] npm が見つかりません。nodejs / npm をインストールします…'; " +
+      "if command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y -qq nodejs npm; " +
+      "elif command -v apk >/dev/null 2>&1; then apk add --no-cache nodejs npm; " +
+      "elif command -v dnf >/dev/null 2>&1; then dnf install -y nodejs npm; " +
+      "elif command -v yum >/dev/null 2>&1; then yum install -y nodejs npm; " +
+      "else echo '[selfcode] 対応するパッケージマネージャがありません。nodejs / npm を手動でインストールしてください'; exit 1; fi; fi; " +
+      "if ! command -v node >/dev/null 2>&1 || ! node -e \"if(Number(process.versions.node.split('.')[0])<18)process.exit(1)\"; then " +
+      "echo '[selfcode] Node.js 18 以上が必要です。古い Node が入っている場合は更新してください'; exit 1; fi; " +
+      'if [ "$(id -u)" = "0" ]; then npm install -g freebuff; else sudo npm install -g freebuff; fi',
   agy:
     'export PATH="$HOME/.local/bin:$PATH"; curl -fsSL https://antigravity.google/cli/install.sh | bash; if [ "$(id -u)" = "0" ] && [ -f /root/.local/bin/agy ]; then cp -f /root/.local/bin/agy /usr/local/bin/agy 2>/dev/null && chmod 755 /usr/local/bin/agy 2>/dev/null || true; fi',
 };
