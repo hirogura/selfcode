@@ -1286,12 +1286,24 @@ app.post("/api/github/repos/existing", async (req, res, next) => {
     if (!containerCtx) {
       const abs = resolveDirRel(p);
       const st = await fsp.stat(abs).catch(() => null);
-      if (!st || !st.isDirectory()) return res.status(400).json({ error: "フォルダが見つかりません: " + p });
+      if (!st || !st.isDirectory()) {
+        if (!req.body.init) return res.status(400).json({ error: "フォルダが見つかりません: " + p });
+        await fsp.mkdir(abs, { recursive: true });
+      }
     }
     const chk = await runGit(p, ["rev-parse", "--is-inside-work-tree"], 10000);
     if (chk.code !== 0 || chk.stdout.trim() !== "true") {
-      const detail = (chk.stderr || "").trim();
-      return res.status(400).json({ error: "git リポジトリではありません: " + p + (detail ? "（" + detail + "）" : "") });
+      if (!req.body.init) {
+        const detail = (chk.stderr || "").trim();
+        return res.status(400).json({ error: "git リポジトリではありません: " + p + (detail ? "（" + detail + "）" : "") });
+      }
+      const initR = containerCtx
+        ? await runGitInContainer(["init", p], 10000)
+        : await runGitSpawn(resolveDirRel(p), ["init"], 10000);
+      if (initR.code !== 0) {
+        if (!containerCtx) { try { await fsp.rm(resolveDirRel(p), { recursive: true, force: true }); } catch {} }
+        return res.status(500).json({ error: "git init に失敗しました: " + (initR.stderr || "").trim() });
+      }
     }
     if (githubCfg.repos.some((r) => r.path === p)) return res.status(400).json({ error: "既に登録済みです: " + p });
     const origin = await gitOriginUrl(p).catch(() => "");

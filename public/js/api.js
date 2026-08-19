@@ -102,7 +102,7 @@ const API = (() => {
       myRepos: () => API.get("/api/github/repos"),
       registered: () => API.get("/api/github/repos/registered"),
       add: (url, dir) => API.post("/api/github/repos", { url, dir }),
-      addExisting: (p) => API.post("/api/github/repos/existing", { path: p }),
+      addExisting: (p, init) => API.post("/api/github/repos/existing", { path: p, init: !!init }),
       action: (id, action, message) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/action", { action, message }),
       remove: (id) => API.del("/api/github/repos/" + encodeURIComponent(id)),
     },

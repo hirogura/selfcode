@@ -121,7 +121,10 @@
           <div id="gh-add" class="gh-add hidden">
             <div class="gh-field">
               <label for="gh-repo-url">URL または owner/repo</label>
-              <input id="gh-repo-url" type="text" placeholder="https://github.com/owner/repo" autocomplete="off">
+              <div class="gh-token-row">
+                <input id="gh-repo-url" type="text" placeholder="https://github.com/owner/repo" autocomplete="off">
+                <button id="gh-own-toggle" class="btn small">リポジトリ選択</button>
+              </div>
             </div>
             <div class="gh-field">
               <label for="gh-repo-dir">保存先フォルダ名（省略可）</label>
@@ -129,7 +132,6 @@
             </div>
             <div class="gh-add-actions">
               <button id="gh-clone" class="btn small primary">クローン</button>
-              <button id="gh-own-toggle" class="btn small">自分のリポジトリから選ぶ</button>
             </div>
             <div id="gh-own" class="gh-own hidden"></div>
             <div class="gh-field gh-field-existing">

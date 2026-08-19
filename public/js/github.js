@@ -324,7 +324,19 @@ const GithubPanel = (() => {
       toast("登録しました: " + p);
       renderRepos();
     } catch (e) {
-      toast(e.message, true);
+      const msg = e.message || "";
+      if (msg.includes("git リポジトリではありません") && confirm("このフォルダは git リポジトリではありません。\ngit init を実行して初期化しますか？")) {
+        try {
+          await API.github.addExisting(p, true);
+          $("gh-existing").value = "";
+          toast("git init を実行して登録しました: " + p);
+          renderRepos();
+        } catch (e2) {
+          toast(e2.message, true);
+        }
+      } else {
+        toast(msg, true);
+      }
     } finally {
       btn.classList.remove("busy");
       btn.disabled = false;
