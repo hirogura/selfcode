@@ -1355,7 +1355,7 @@ app.post("/api/github/repos/:id/action", async (req, res, next) => {
       return res.json({ ok: r.code === 0, action, output });
     }
     if (action === "cancel") {
-      const r1 = await runGit(repo.path, ["reset", "--hard", "HEAD"], 30000);
+      const r1 = await runGit(repo.path, ["reset", "--hard", "HEAD^"], 30000);
       const r2 = await runGit(repo.path, ["clean", "-fd"], 30000);
       const output = ((r1.stdout + r1.stderr) + "\n" + (r2.stdout + r2.stderr)).trim();
       return res.json({ ok: r1.code === 0 && r2.code === 0, action, output });

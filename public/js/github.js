@@ -191,7 +191,7 @@ const GithubPanel = (() => {
       '<button class="btn small primary" data-act="pull">pull</button>' +
       '<button class="btn small" data-act="status">状態</button>' +
       '<button class="btn small" data-act="commit">コミット</button>' +
-      '<button class="btn small" data-act="cancel" title="全変更を破棄して直前のコミット状態に戻す">キャンセル</button>' +
+      '<button class="btn small" data-act="cancel" title="最新コミットと未コミット変更をすべて破棄して直前のコミット状態に戻す">キャンセル</button>' +
       '<button class="btn small" data-act="push">push</button>' +
       '<button class="btn small" data-act="log">ログ</button>' +
       '<button class="btn small" data-act="open">開く</button>' +
