@@ -647,7 +647,7 @@ const App = (() => {
     const pane = {
       id: id || genPaneId(),
       cwd: cwd || "",
-      user: user || (termIsRoot ? "root" : termUser),
+      user: user || (rootMode ? "root" : termUser),
       term: null,
       fit: null,
       ws: null,
