@@ -194,7 +194,14 @@ const App = (() => {
       e.stopPropagation();
       closeTab(path);
     };
-    tab.append(name, close);
+    const dot = document.createElement("span");
+    dot.className = "dirty-dot";
+    dot.textContent = "●";
+    dot.onclick = (e) => {
+      e.stopPropagation();
+      saveDoc(path);
+    };
+    tab.append(name, dot, close);
     tab.onclick = () => activateTab(path);
     els.tabs.appendChild(tab);
   }

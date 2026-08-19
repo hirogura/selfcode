@@ -210,7 +210,8 @@ body.resizing-h { cursor: row-resize; user-select: none; }
 .tab .close { opacity: 0; border-radius: 4px; padding: 0 4px; }
 .tab:hover .close { opacity: 1; }
 .tab .close:hover { background: var(--bg-3); }
-.tab.dirty::after { content: "●"; color: var(--fg-dim); font-size: 9px; }
+.tab .dirty-dot { display: none; color: var(--fg-dim); font-size: 9px; cursor: pointer; margin-left: 2px; }
+.tab.dirty .dirty-dot { display: inline; }
 
 .editor-host { flex: 1; position: relative; min-height: 0; }
 .empty-state { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--fg-dim); z-index: 5; }
