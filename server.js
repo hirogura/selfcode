@@ -1324,7 +1324,7 @@ app.post("/api/github/repos/:id/action", async (req, res, next) => {
     const action = String(req.body.action || "");
     const repo = githubCfg.repos.find((r) => r.id === id);
     if (!repo) return res.status(404).json({ error: "リポジトリが見つかりません" });
-    if (!["status", "fetch", "pull", "log", "commit", "push"].includes(action)) {
+    if (!["status", "fetch", "pull", "log", "commit", "cancel", "push"].includes(action)) {
       return res.status(400).json({ error: "不明な操作です" });
     }
     if (action === "status") {
@@ -1353,6 +1353,12 @@ app.post("/api/github/repos/:id/action", async (req, res, next) => {
       const r = await runGit(repo.path, ["commit", "-m", message], 60000);
       const output = (r.stdout + r.stderr).trim();
       return res.json({ ok: r.code === 0, action, output });
+    }
+    if (action === "cancel") {
+      const r1 = await runGit(repo.path, ["reset", "--hard", "HEAD"], 30000);
+      const r2 = await runGit(repo.path, ["clean", "-fd"], 30000);
+      const output = ((r1.stdout + r1.stderr) + "\n" + (r2.stdout + r2.stderr)).trim();
+      return res.json({ ok: r1.code === 0 && r2.code === 0, action, output });
     }
     if (action === "log") {
       const r = await runGit(repo.path, ["log", "--oneline", "-10"], 60000);

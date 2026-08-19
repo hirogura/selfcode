@@ -187,12 +187,13 @@ const GithubPanel = (() => {
       '<div class="gh-repo-meta">' + esc(meta) + "</div>" +
       '<div class="gh-repo-actions">' +
       '<button class="btn small" data-act="term" title="ターミナルで開き、エクスプローラもそのフォルダへ移動">Term</button>' +
-      '<button class="btn small" data-act="status">状態</button>' +
       '<button class="btn small" data-act="fetch">取得</button>' +
       '<button class="btn small primary" data-act="pull">pull</button>' +
-      '<button class="btn small" data-act="log">ログ</button>' +
+      '<button class="btn small" data-act="status">状態</button>' +
       '<button class="btn small" data-act="commit">コミット</button>' +
+      '<button class="btn small" data-act="cancel" title="全変更を破棄して直前のコミット状態に戻す">キャンセル</button>' +
       '<button class="btn small" data-act="push">push</button>' +
+      '<button class="btn small" data-act="log">ログ</button>' +
       '<button class="btn small" data-act="open">開く</button>' +
       "</div>" +
       '<div class="gh-commit-row hidden">' +
