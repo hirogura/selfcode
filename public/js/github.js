@@ -251,9 +251,9 @@ const GithubPanel = (() => {
           '<div style="margin-bottom:8px;color:var(--fg-dim)">pullに失敗しました。リモートリポジトリのURLを設定してください。</div>' +
           '<div style="margin-bottom:4px;font-size:11px;color:var(--fg-dim)">' + esc(pullOutput || "") + '</div>' +
           '<label style="display:block;margin-top:8px;font-size:11px;color:var(--fg-dim)">リモートURL</label>' +
-          '<input id="gh-remote-url" type="text" style="width:100%;box-sizing:border-box;padding:5px 8px;margin-top:2px;font-size:13px" placeholder="https://github.com/user/repo.git" autocomplete="off">' +
+          '<input id="gh-remote-url" type="text" style="width:100%;box-sizing:border-box;padding:5px 8px;margin-top:2px;font-size:13px;background:#000;color:#fff;border:1px solid var(--border)" placeholder="https://github.com/user/repo.git" autocomplete="off">' +
           '<label style="display:block;margin-top:8px;font-size:11px;color:var(--fg-dim)">ブランチ名</label>' +
-          '<input id="gh-remote-branch" type="text" style="width:100%;box-sizing:border-box;padding:5px 8px;margin-top:2px;font-size:13px" placeholder="main" autocomplete="off">' +
+          '<input id="gh-remote-branch" type="text" style="width:100%;box-sizing:border-box;padding:5px 8px;margin-top:2px;font-size:13px;background:#000;color:#fff;border:1px solid var(--border)" placeholder="main" autocomplete="off">' +
         '</div>' +
         '<div style="display:flex;justify-content:flex-end;gap:6px;padding:8px 12px;border-top:1px solid var(--border)">' +
           '<button id="gh-remote-cancel" class="btn small">キャンセル</button>' +

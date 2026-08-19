@@ -1354,8 +1354,28 @@ app.post("/api/github/repos/:id/action", async (req, res, next) => {
       const output = (r.stdout + r.stderr).trim();
       return res.json({ ok: r.code === 0, action, output });
     }
-    const args = action === "log" ? ["log", "--oneline", "-10"] : [action];
-    const r = await runGit(repo.path, args, action === "pull" ? 120000 : 60000);
+    if (action === "log") {
+      const r = await runGit(repo.path, ["log", "--oneline", "-10"], 60000);
+      const output = (r.stdout + r.stderr).trim();
+      return res.json({ ok: r.code === 0, action, code: r.code, output });
+    }
+    if (action === "pull") {
+      let r = await runGit(repo.path, ["pull"], 120000);
+      if (r.code !== 0) {
+        const errText = (r.stdout + r.stderr).trim();
+        // upstream 未設定の場合は origin/ブランチ を明示して再試行
+        if (/does not appear to be a git repository|no tracking information|please specify which branch|git branch --set-upstream-to/i.test(errText)) {
+          const br = await runGit(repo.path, ["branch", "--show-current"], 5000);
+          const curBranch = (br.stdout || "").trim() || "main";
+          r = await runGit(repo.path, ["pull", "origin", curBranch], 120000);
+          // upstream も設定しておく
+          await runGit(repo.path, ["branch", "--set-upstream-to=origin/" + curBranch], 5000).catch(() => {});
+        }
+      }
+      const output = (r.stdout + r.stderr).trim();
+      return res.json({ ok: r.code === 0, action, code: r.code, output });
+    }
+    const r = await runGit(repo.path, [action], 60000);
     const output = (r.stdout + r.stderr).trim();
     res.json({ ok: r.code === 0, action, code: r.code, output });
   } catch (e) {
@@ -1383,13 +1403,18 @@ app.post("/api/github/repos/:id/remote", async (req, res, next) => {
       const addR = await runGit(repo.path, ["remote", "add", "origin", url], 10000);
       if (addR.code !== 0) return res.json({ ok: false, output: (addR.stdout + addR.stderr).trim() });
     }
-    // トラッキングブランチを設定
-    const upR = await runGit(repo.path, ["branch", "--set-upstream-to=origin/" + branch], 10000);
-    const output = (upR.stdout + upR.stderr).trim();
+    // トラッキングブランチを設定（現在のブランチが存在する場合のみ）
+    const brR = await runGit(repo.path, ["branch", "--show-current"], 5000);
+    const curBranch = (brR.stdout || "").trim();
+    let upOutput = "";
+    if (curBranch) {
+      const upR = await runGit(repo.path, ["branch", "--set-upstream-to=origin/" + branch, curBranch], 10000);
+      upOutput = (upR.stdout + upR.stderr).trim();
+    }
     // repoのURLも更新
     repo.url = url;
     await saveGithubConfig();
-    res.json({ ok: upR.code === 0, output: output || ("リモートを設定しました: origin → " + url + "\nトラッキング: origin/" + branch) });
+    res.json({ ok: true, output: upOutput || ("リモートを設定しました: origin → " + url + "\nトラッキング: origin/" + branch) });
   } catch (e) {
     next(e);
   }
