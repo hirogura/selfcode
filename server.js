@@ -97,7 +97,7 @@ app.use((req, res, next) => {
   return express.json({ limit: "64mb" })(req, res, next);
 });
 
-const oc = { port: null, password: OC_PASS, ready: false, child: null, version: null };
+const oc = { port: null, password: OC_PASS, ready: false, child: null, version: null, manualStop: false };
 
 function findFreePort() {
   return new Promise((resolve, reject) => {
@@ -111,6 +111,8 @@ function findFreePort() {
 }
 
 async function startOpencode() {
+  if (oc.manualStop) return; // 手動停止済みなら再起動しない
+  if (oc.child) return; // 既に起動済み
   const port = await findFreePort();
   if (!oc.password) oc.password = crypto.randomBytes(24).toString("base64url");
   const env = { ...process.env, OPENCODE_SERVER_PASSWORD: oc.password, OPENCODE_SERVER_USERNAME: OC_USER };
@@ -130,15 +132,31 @@ async function startOpencode() {
   });
   child.stderr.on("data", (d) => process.stderr.write(`[opencode] ${String(d).trimEnd()}\n`));
   child.on("exit", (code) => {
-    console.log(`[selfcode] opencode exited (${code}), restarting in 3s`);
     oc.ready = false;
     oc.port = null;
+    if (oc.manualStop) {
+      console.log(`[selfcode] opencode stopped manually (${code})`);
+      return;
+    }
+    console.log(`[selfcode] opencode exited (${code}), restarting in 3s`);
     setTimeout(startOpencode, 3000);
   });
 }
 
+function stopOpencode() {
+  if (!oc.child) return;
+  oc.manualStop = true;
+  try { oc.child.kill("SIGTERM"); } catch {}
+  oc.child = null;
+  oc.ready = false;
+  oc.port = null;
+  console.log("[selfcode] opencode stopped");
+}
+
 async function waitOpencode() {
   if (oc.ready) return;
+  oc.manualStop = false; // プロキシ要求時 = チャットパネルが開かれたので再起動を許可
+  startOpencode(); // 未起動なら起動する
   await new Promise((resolve) => {
     const t = setInterval(() => {
       if (oc.ready) {
@@ -265,6 +283,11 @@ app.get("/api/status", (req, res) => {
     termUser: TERM_USER,
     termIsRoot: IS_ROOT,
   });
+});
+
+app.post("/api/opencode/stop", (req, res) => {
+  stopOpencode();
+  res.json({ ok: true });
 });
 
 // ================= 一時SSH（agy などの OAuth 認証を手元 PC から行えるようにする） =================
@@ -1900,7 +1923,7 @@ server.listen(PORT, HOST, () => {
   console.log(`[selfcode] listening on http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}`);
   console.log(`[selfcode] root: ${ROOT}`);
   if (SELF_PASS) console.log(`[selfcode] basic auth enabled (user: ${SELF_USER})`);
-  startOpencode();
+  // opencode はチャットパネルが開かれたとき（プロキシ初回要求時）に自動起動する
 });
 
 function shutdown() {

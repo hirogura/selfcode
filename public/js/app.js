@@ -1525,10 +1525,23 @@ const App = (() => {
     els.memo.classList.toggle("stretch", els.chatContent.classList.contains("hidden"));
   }
 
+  let chatInitialized = false;
+  async function initChatOnce() {
+    if (chatInitialized) return;
+    chatInitialized = true;
+    try { await Chat.init(); } catch (e) { console.error("Chat init failed", e); }
+  }
+
   function toggleChat() {
-    els.chatContent.classList.toggle("hidden");
+    const hiding = els.chatContent.classList.toggle("hidden");
     $("btn-chat").classList.toggle("active", !els.chatContent.classList.contains("hidden"));
     syncChatPanel();
+    if (!els.chatContent.classList.contains("hidden")) {
+      initChatOnce();
+    } else {
+      Chat.stop();
+      API.oc.stop().catch(() => {});
+    }
   }
 
   // ---- エクスプローラ / エディタの表示切替（ツールバー左端のボタン） ----
@@ -1885,7 +1898,6 @@ const App = (() => {
     });
 
     GithubPanel.init();
-    await Chat.init();
   }
 
   document.addEventListener("DOMContentLoaded", boot);

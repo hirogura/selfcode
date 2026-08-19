@@ -1016,5 +1016,10 @@ const Chat = (() => {
     poll();
   }
 
-  return { init, setDirectory, onFileChanged: (f) => {}, openFile: (p) => {} };
+  function stop() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    setStatus(false);
+  }
+
+  return { init, stop, setDirectory, onFileChanged: (f) => {}, openFile: (p) => {} };
 })();
