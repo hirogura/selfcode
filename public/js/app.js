@@ -23,6 +23,7 @@ const App = (() => {
   let containerInfo = null; // { name, runtime } | null
   let termUser = "root"; // ホスト側ターミナルの既定ユーザー（/api/status から取得）
   let termIsRoot = false; // サーバーが root で動いているか（root のときのみユーザー切替可能）
+  let rootMode = false; // root モード（ON で opencode/freebuff/agy を root で実行）
   let editor = null;
   const docs = new Map();
   const models = new Map();
@@ -646,7 +647,7 @@ const App = (() => {
     const pane = {
       id: id || genPaneId(),
       cwd: cwd || "",
-      user: user || termUser,
+      user: user || (termIsRoot ? "root" : termUser),
       term: null,
       fit: null,
       ws: null,
@@ -1039,7 +1040,7 @@ const App = (() => {
   }
 
   function execPane(pane, cmd) {
-    sendPane(pane, { type: "exec", cmd, cwd: pane.cwd });
+    sendPane(pane, { type: "exec", cmd, cwd: pane.cwd, ...(rootMode ? { root: true } : {}) });
   }
 
   const TERM_STATE_KEY = "selfcode.termPanes";
@@ -1262,6 +1263,12 @@ const App = (() => {
 
   function openAgTerminal() {
     openToolInTerminal("agy");
+  }
+
+  function toggleRootMode() {
+    rootMode = !rootMode;
+    $("btn-root").classList.toggle("active", rootMode);
+    toast(rootMode ? "Root モード ON: opencode/freebuff/agy が root で実行されます" : "Root モード OFF");
   }
 
   let sshTempOn = false; // 「一時SSH」ボタンの状態（/api/ssh-temp と同期）
@@ -1835,6 +1842,7 @@ const App = (() => {
     $("btn-freebuff").onclick = openFreebuffTerminal;
     $("btn-opencode").onclick = openOpencodeTerminal;
     $("btn-ag").onclick = openAgTerminal;
+    $("btn-root").onclick = toggleRootMode;
     $("btn-ssh-temp").onclick = toggleSshTemp;
     // 「一時SSH」ボタンの状態を復元
     fetch("/api/ssh-temp", { cache: "no-store" })

@@ -99,6 +99,7 @@ button, select, textarea, input { font: inherit; color: inherit; }
 .btn.danger { color: var(--red); }
 .btn.danger:hover { background: rgba(248, 81, 73, .12); border-color: rgba(248, 81, 73, .35); }
 .btn.toggle.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+#btn-root.active { background: var(--red, #e5534b); border-color: var(--red, #e5534b); color: #fff; }
 .btn.busy {
   pointer-events: none;
   display: inline-flex;

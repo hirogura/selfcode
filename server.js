@@ -1719,7 +1719,7 @@ wss.on("connection", (ws, req) => {
       if (msg.type === "input") t.write(msg.data);
       else if (msg.type === "resize") t.resize(Number(msg.cols) || 80, Number(msg.rows) || 24);
       else if (msg.type === "cwd") setTermCwd(msg.cwd).catch((e) => broadcast({ type: "data", data: "\r\n\x1b[31m[selfcode] " + e.message + "\x1b[0m\r\n" }));
-      else if (msg.type === "exec") execCmd(msg.cwd, msg.cmd).catch((e) => broadcast({ type: "data", data: "\r\n\x1b[31m[selfcode] " + e.message + "\x1b[0m\r\n" }));
+      else if (msg.type === "exec") execCmd(msg.cwd, msg.cmd, msg.root).catch((e) => broadcast({ type: "data", data: "\r\n\x1b[31m[selfcode] " + e.message + "\x1b[0m\r\n" }));
       else if (msg.type === "user") setTermUser(msg.user, msg.cwd).catch((e) => broadcast({ type: "data", data: "\r\n\x1b[31m[selfcode] " + e.message + "\x1b[0m\r\n" }));
       else if (msg.type === "kill") {
         // ペインを閉じるときの明示的な終了（切断だけではプロセスが残るため）
@@ -1843,7 +1843,7 @@ wss.on("connection", (ws, req) => {
     broadcast({ type: "data", data: TERM_WELCOME });
   }
 
-  async function execCmd(target, cmdRaw) {
+  async function execCmd(target, cmdRaw, forceRoot) {
     const cmd = String(cmdRaw || "freebuff");
     if (!/^[a-zA-Z0-9._/+-]+$/.test(cmd)) throw new Error("invalid command");
     if (containerCtx) {
@@ -1872,11 +1872,13 @@ wss.on("connection", (ws, req) => {
     const dir = resolveDirRel(target);
     const st = await fsp.stat(dir);
     if (!st.isDirectory()) throw new Error("not a directory");
+    // root モードが ON の場合は root で実行する
+    const execUser = (forceRoot && IS_ROOT) ? "root" : rec.user;
     // 未インストールのコマンド（opencode / freebuff / agy）は確認してからインストールする
     // （判定はターミナルが実際に使う PATH = env.PATH で行う。agy は端末ユーザーの ~/.local/bin も対象）
-    const userHome = rec.user ? userHomeOf(rec.user) : (process.env.HOME || os.homedir());
+    const userHome = execUser ? userHomeOf(execUser) : (process.env.HOME || os.homedir());
     if (!findBin(cmd, env.PATH, userHome) && INSTALL_CMDS[cmd]) {
-      spawnInstallFlow(dir, cmd, INSTALL_CMDS[cmd], rec.user);
+      spawnInstallFlow(dir, cmd, INSTALL_CMDS[cmd], execUser);
       rec.cmd = cmd;
       broadcast({ type: "started", cmd, cwd: dir, installing: true });
       return;
@@ -1884,7 +1886,7 @@ wss.on("connection", (ws, req) => {
     // シェル経由で起動して、シェルの初始化（profile 読み込み・PATH 設定）を行う。
     // これにより、opencode の内部シェルも正しく動作する。
     const userShell = process.env.SHELL || (fs.existsSync("/bin/bash") ? "/bin/bash" : "/bin/sh");
-    spawnTermProc(dir, userShell, ["-l", "-c", cmd], rec.user);
+    spawnTermProc(dir, userShell, ["-l", "-c", cmd], execUser);
     rec.cmd = cmd;
     broadcast({ type: "started", cmd, cwd: dir });
   }
