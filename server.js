@@ -1363,6 +1363,38 @@ app.post("/api/github/repos/:id/action", async (req, res, next) => {
   }
 });
 
+// リモートURLの追加/更新とトラッキングブランチの設定
+app.post("/api/github/repos/:id/remote", async (req, res, next) => {
+  try {
+    const id = String(req.params.id || "");
+    const repo = githubCfg.repos.find((r) => r.id === id);
+    if (!repo) return res.status(404).json({ error: "リポジトリが見つかりません" });
+    const url = String(req.body.url || "").trim();
+    const branch = String(req.body.branch || "main").trim() || "main";
+    if (!url) return res.status(400).json({ error: "リモートURLを入力してください" });
+    // 既に origin が存在するか確認
+    const existR = await runGit(repo.path, ["remote", "get-url", "origin"], 10000);
+    if (existR.code === 0) {
+      // 既存 → URLを更新
+      const setR = await runGit(repo.path, ["remote", "set-url", "origin", url], 10000);
+      if (setR.code !== 0) return res.json({ ok: false, output: (setR.stdout + setR.stderr).trim() });
+    } else {
+      // 新規追加
+      const addR = await runGit(repo.path, ["remote", "add", "origin", url], 10000);
+      if (addR.code !== 0) return res.json({ ok: false, output: (addR.stdout + addR.stderr).trim() });
+    }
+    // トラッキングブランチを設定
+    const upR = await runGit(repo.path, ["branch", "--set-upstream-to=origin/" + branch], 10000);
+    const output = (upR.stdout + upR.stderr).trim();
+    // repoのURLも更新
+    repo.url = url;
+    await saveGithubConfig();
+    res.json({ ok: upR.code === 0, output: output || ("リモートを設定しました: origin → " + url + "\nトラッキング: origin/" + branch) });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // 登録を解除（ファイルは削除しない）
 app.delete("/api/github/repos/:id", async (req, res, next) => {
   try {

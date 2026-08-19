@@ -241,6 +241,62 @@ const GithubPanel = (() => {
     repoAction(id, btn.dataset.act);
   }
 
+  function showRemoteDialog(id, repo, pullOutput) {
+    const overlay = document.createElement("div");
+    overlay.className = "modal";
+    overlay.innerHTML =
+      '<div class="modal-box" style="min-width:400px">' +
+        '<div class="modal-head"><span>リモートを設定</span></div>' +
+        '<div style="padding:12px;font-size:13px;line-height:1.6">' +
+          '<div style="margin-bottom:8px;color:var(--fg-dim)">pullに失敗しました。リモートリポジトリのURLを設定してください。</div>' +
+          '<div style="margin-bottom:4px;font-size:11px;color:var(--fg-dim)">' + esc(pullOutput || "") + '</div>' +
+          '<label style="display:block;margin-top:8px;font-size:11px;color:var(--fg-dim)">リモートURL</label>' +
+          '<input id="gh-remote-url" type="text" style="width:100%;box-sizing:border-box;padding:5px 8px;margin-top:2px;font-size:13px" placeholder="https://github.com/user/repo.git" autocomplete="off">' +
+          '<label style="display:block;margin-top:8px;font-size:11px;color:var(--fg-dim)">ブランチ名</label>' +
+          '<input id="gh-remote-branch" type="text" style="width:100%;box-sizing:border-box;padding:5px 8px;margin-top:2px;font-size:13px" placeholder="main" autocomplete="off">' +
+        '</div>' +
+        '<div style="display:flex;justify-content:flex-end;gap:6px;padding:8px 12px;border-top:1px solid var(--border)">' +
+          '<button id="gh-remote-cancel" class="btn small">キャンセル</button>' +
+          '<button id="gh-remote-ok" class="btn small primary">設定してpull再実行</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    const urlInput = $("gh-remote-url");
+    const branchInput = $("gh-remote-branch");
+    urlInput.value = (repo && repo.url) || "";
+    branchInput.value = "main";
+    urlInput.focus();
+    function close() { overlay.remove(); }
+    overlay.querySelector("#gh-remote-cancel").onclick = close;
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+    overlay.querySelector("#gh-remote-ok").onclick = async () => {
+      const url = urlInput.value.trim();
+      const branch = branchInput.value.trim() || "main";
+      if (!url) { toast("リモートURLを入力してください", true); return; }
+      const okBtn = $("gh-remote-ok");
+      okBtn.disabled = true;
+      okBtn.textContent = "設定中…";
+      try {
+        const rRes = await API.github.addRemote(id, url, branch);
+        if (!rRes.ok) { toast(rRes.output || "リモート設定に失敗しました", true); return; }
+        close();
+        toast("リモートを設定しました。pullを再実行します…");
+        await repoAction(id, "pull");
+      } catch (e2) {
+        toast(e2.message, true);
+      }
+    };
+  }
+
+  function isPullRemoteError(output) {
+    if (!output) return false;
+    const lower = output.toLowerCase();
+    return lower.includes("does not appear to be a git repository") ||
+           lower.includes("no tracking information") ||
+           lower.includes("please specify which branch") ||
+           lower.includes("git branch --set-upstream-to");
+  }
+
   async function repoAction(id, act, message) {
     if (act === "open") {
       const repo = lastRegistered.find((r) => r.id === id);
@@ -261,8 +317,6 @@ const GithubPanel = (() => {
       const res = await API.github.action(id, act, message);
       const outputText = res.output || (res.ok ? "完了しました" : "失敗しました");
       const isErr = !res.ok;
-      // 一覧を再描画して branch / ahead / behind などの状態を更新するが、
-      // 再構築で出力が消えないよう、実行結果は描画後に表示し直す。
       await renderRepos();
       const item2 = $("gh-repos").querySelector(`.gh-repo[data-id="${CSS.escape(id)}"]`);
       const out2 = item2 && item2.querySelector(".gh-repo-output");
@@ -270,6 +324,10 @@ const GithubPanel = (() => {
         out2.textContent = outputText;
         out2.classList.toggle("err", isErr);
         out2.classList.remove("hidden");
+      }
+      if (!res.ok && act === "pull" && isPullRemoteError(res.output)) {
+        const repo = lastRegistered.find((r) => r.id === id);
+        showRemoteDialog(id, repo, res.output);
       }
     } catch (e) {
       if (out) {
