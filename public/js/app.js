@@ -1546,11 +1546,24 @@ const App = (() => {
     try { await Chat.init(); } catch (e) { console.error("Chat init failed", e); }
   }
 
-  function toggleChat() {
+  async function toggleChat() {
     const hiding = els.chatContent.classList.toggle("hidden");
     $("btn-chat").classList.toggle("active", !els.chatContent.classList.contains("hidden"));
     syncChatPanel();
     if (!els.chatContent.classList.contains("hidden")) {
+      // opencode がインストールされていない場合は、ターミナルでインストールする
+      try {
+        const check = await API.get("/api/opencode/check");
+        if (check && !check.installed) {
+          els.chatContent.classList.add("hidden");
+          $("btn-chat").classList.remove("active");
+          syncChatPanel();
+          openOpencodeTerminal();
+          return;
+        }
+      } catch (e) {
+        // チェックに失敗してもチャットを開く（サーバー側で自動起動のため）
+      }
       initChatOnce();
     } else {
       Chat.stop();

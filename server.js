@@ -290,6 +290,12 @@ app.post("/api/opencode/stop", (req, res) => {
   res.json({ ok: true });
 });
 
+// opencode がインストールされているかどうかを返す
+app.get("/api/opencode/check", (req, res) => {
+  const installed = !!findBin("opencode", process.env.PATH || "", process.env.HOME || os.homedir());
+  res.json({ installed });
+});
+
 // ================= 一時SSH（agy などの OAuth 認証を手元 PC から行えるようにする） =================
 // 選択中の LXD コンテナ（未選択ならホスト）の sshd に対して、一時パスワードの設定と
 // パスワード認証・root ログインの一時有効化を行い、OFF で元に戻す。
@@ -1574,6 +1580,12 @@ function findBin(name, pathStr, extraHome) {
   const candidates = dirs.map((d) => path.join(d, name));
   if (name === "lxc") candidates.push("/snap/bin/lxc", "/usr/bin/lxc", "/usr/local/bin/lxc");
   if (name === "docker") candidates.push("/usr/bin/docker", "/usr/local/bin/docker", "/snap/bin/docker");
+  // opencode は ~/.opencode/bin にインストールされる（PATH に無くても検出できるようにしておく）
+  if (name === "opencode") {
+    const homes = [process.env.HOME || os.homedir(), extraHome].filter(Boolean);
+    for (const h of homes) candidates.push(path.join(h, ".opencode/bin/opencode"));
+    candidates.push("/usr/local/bin/opencode");
+  }
   // Antigravity CLI (agy) は ~/.local/bin にインストールされる（PATH に無くても検出できるようにしておく。
   // extraHome = ターミナルの実行ユーザーのホーム。ユーザー切替でインストールされた場所も検出する）
   if (name === "agy") {
