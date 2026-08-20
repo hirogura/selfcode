@@ -292,7 +292,11 @@ app.post("/api/opencode/stop", (req, res) => {
 
 // opencode がインストールされているかどうかを返す
 app.get("/api/opencode/check", (req, res) => {
-  const installed = !!findBin("opencode", process.env.PATH || "", process.env.HOME || os.homedir());
+  // root で動いている場合、process.env.HOME は /root になるが、
+  // ターミナルユーザーのホーム（例: /home/user）にもインストールされることがあるため、
+  // 両方のホームディレクトリを検出対象にする
+  const termHome = TERM_USER ? userHomeOf(TERM_USER) : null;
+  const installed = !!findBin("opencode", process.env.PATH || "", termHome);
   res.json({ installed });
 });
 
