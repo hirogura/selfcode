@@ -68,6 +68,44 @@ const GithubPanel = (() => {
     }
   }
 
+  // ---- コミット設定（git config --global user.name / user.email） ----
+
+  async function loadGitConfig() {
+    try {
+      const cfg = await API.github.gitConfig();
+      const nameEl = $("gh-git-name");
+      const emailEl = $("gh-git-email");
+      if (document.activeElement !== nameEl) nameEl.value = cfg.name || "";
+      if (document.activeElement !== emailEl) emailEl.value = cfg.email || "";
+    } catch {}
+  }
+
+  async function saveGitConfig() {
+    const name = $("gh-git-name").value.trim();
+    const email = $("gh-git-email").value.trim();
+    if (!name && !email) return toast("ユーザー名またはメールアドレスを入力してください", true);
+    const btn = $("gh-git-save");
+    btn.classList.add("busy");
+    btn.disabled = true;
+    try {
+      const res = await API.github.saveGitConfig(name, email);
+      const st = $("gh-git-status");
+      st.textContent = "保存しました（git config --global）";
+      st.classList.add("ok");
+      st.classList.remove("err");
+      toast("コミット設定を保存しました");
+    } catch (e) {
+      const st = $("gh-git-status");
+      st.textContent = "保存に失敗: " + e.message;
+      st.classList.add("err");
+      st.classList.remove("ok");
+      toast(e.message, true);
+    } finally {
+      btn.classList.remove("busy");
+      btn.disabled = false;
+    }
+  }
+
   function setSettingsStatus(msg, ok) {
     const st = $("gh-settings-status");
     st.textContent = msg;
@@ -148,6 +186,7 @@ const GithubPanel = (() => {
     }
     renderSettings();
     renderRepos();
+    loadGitConfig();
   }
 
   async function renderRepos() {
@@ -555,6 +594,7 @@ const GithubPanel = (() => {
     $("gh-check").onclick = checkConnection;
     $("gh-clear").onclick = clearSettings;
     $("gh-token-toggle").onclick = toggleTokenVisible;
+    $("gh-git-save").onclick = saveGitConfig;
     $("gh-add-toggle").onclick = () => $("gh-add").classList.toggle("hidden");
     $("gh-clone").onclick = cloneRepo;
     $("gh-own-toggle").onclick = toggleOwnRepos;
@@ -569,6 +609,7 @@ const GithubPanel = (() => {
         loaded = true;
         renderSettings();
         renderRepos();
+        loadGitConfig();
       })
       .catch(() => {});
     if (localStorage.getItem(KEY) === "1") show();

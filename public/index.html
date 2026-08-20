@@ -108,6 +108,19 @@
             <button id="gh-clear" class="btn small danger">クリア</button>
           </div>
           <div id="gh-settings-status" class="gh-status"></div>
+          <div class="gh-sep"></div>
+          <div class="gh-field">
+            <label for="gh-git-name">コミット ユーザー名</label>
+            <input id="gh-git-name" type="text" placeholder="git config --global user.name" autocomplete="off">
+          </div>
+          <div class="gh-field">
+            <label for="gh-git-email">メールアドレス</label>
+            <input id="gh-git-email" type="text" placeholder="git config --global user.email" autocomplete="off">
+          </div>
+          <div class="gh-actions">
+            <button id="gh-git-save" class="btn small primary">コミット設定を保存</button>
+          </div>
+          <div id="gh-git-status" class="gh-status"></div>
         </div>
         <div class="gh-section">
           <div class="gh-sec-head">

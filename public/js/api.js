@@ -108,6 +108,8 @@ const API = (() => {
       cleanupBranches: (id) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/action", { action: "cleanup" }),
       addRemote: (id, url, branch) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/remote", { url, branch }),
       remove: (id) => API.del("/api/github/repos/" + encodeURIComponent(id)),
+      gitConfig: () => API.get("/api/github/git-config"),
+      saveGitConfig: (name, email) => API.put("/api/github/git-config", { name, email }),
     },
 
     oc: {

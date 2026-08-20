@@ -689,6 +689,7 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
 .gh-token-row { display: flex; gap: 4px; }
 .gh-token-row input { flex: 1; min-width: 0; }
 .gh-token-row .btn { flex: 0 0 auto; }
+.gh-sep { height: 1px; background: var(--border); margin: 8px 10px; }
 .gh-actions { display: flex; gap: 6px; padding: 8px 10px; }
 .gh-status {
   padding: 0 10px 8px;

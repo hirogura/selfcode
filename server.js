@@ -1184,6 +1184,65 @@ app.delete("/api/github/settings", async (req, res, next) => {
   }
 });
 
+// git config --global user.name / user.email の取得・保存
+async function runGitConfigGet(key) {
+  const { code, stdout } = await new Promise((resolve) => {
+    const child = spawn("git", ["config", "--global", key], {
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let out = "";
+    child.stdout.on("data", (d) => (out += d));
+    child.on("error", () => resolve({ code: -1, stdout: "" }));
+    child.on("close", (code) => resolve({ code, stdout: out }));
+  });
+  return code === 0 ? stdout.trim() : "";
+}
+
+async function runGitConfigSet(key, value) {
+  if (!value) {
+    await new Promise((resolve) => {
+      const child = spawn("git", ["config", "--global", "--unset", key], {
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+        stdio: ["ignore", "ignore", "ignore"],
+      });
+      child.on("error", () => {});
+      child.on("close", () => resolve());
+    });
+    return;
+  }
+  await new Promise((resolve) => {
+    const child = spawn("git", ["config", "--global", key, value], {
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    child.on("error", () => {});
+    child.on("close", () => resolve());
+  });
+}
+
+app.get("/api/github/git-config", async (req, res, next) => {
+  try {
+    const name = await runGitConfigGet("user.name");
+    const email = await runGitConfigGet("user.email");
+    res.json({ name, email });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.put("/api/github/git-config", async (req, res, next) => {
+  try {
+    const name = String(req.body.name ?? "").trim();
+    const email = String(req.body.email ?? "").trim();
+    await runGitConfigSet("user.name", name);
+    await runGitConfigSet("user.email", email);
+    res.json({ ok: true, name, email });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // トークンの接続確認（GitHub ユーザー情報を取得）
 app.get("/api/github/user", async (req, res, next) => {
   try {
