@@ -74,10 +74,10 @@ PORT=3339 npm start
 | `ROOT` | `/` | 編集対象ディレクトリ（例: `ROOT=/home/user/myproject`） |
 | `SELFCODE_USERNAME` / `SELFCODE_PASSWORD` | なし | 設定すると selfcode 自体に Basic 認証を付与 |
 | `SELFCODE_TERM_USER` | 自動検出 | ホスト側ターミナルの既定ユーザー（例: `user`。未指定なら uid 1000 以上の実ユーザーを検出） |
-| `SELFCODE_MEMO` | `/opt/lxd-data/note/selfcode-memo.md` | メモパネルの保存先 |
-| `SELFCODE_GITHUB_CONFIG` | `/opt/lxd-data/note/selfcode-github.json` | GitHub 連携の設定保存先（ユーザー名・トークン・登録リポジトリ。トークンはブラウザに返さずサーバー側でのみ使用） |
-| `SELFCODE_TERM_STATE` | `/opt/lxd-data/note/selfcode-term.json` | ターミナルのペイン構成（分割・cwd・id）の保存先。別のPCから同じ selfcode を開いても同じターミナルプロセスに再接続するために使う |
-| `SELFCODE_CHAT_STATE` | `/opt/lxd-data/note/selfcode-chat.json` | チャットで選択中の opencode セッションとワークスペースの保存先 |
+| `SELFCODE_MEMO` | `/opt/lxd-data/note/selfcode/selfcode-memo.md` | メモパネルの保存先 |
+| `SELFCODE_GITHUB_CONFIG` | `/opt/lxd-data/note/selfcode/selfcode-github.json` | GitHub 連携の設定保存先（ユーザー名・トークン・登録リポジトリ。トークンはブラウザに返さずサーバー側でのみ使用） |
+| `SELFCODE_TERM_STATE` | `/opt/lxd-data/note/selfcode/selfcode-term.json` | ターミナルのペイン構成（分割・cwd・id）の保存先。別のPCから同じ selfcode を開いても同じターミナルプロセスに再接続するために使う |
+| `SELFCODE_CHAT_STATE` | `/opt/lxd-data/note/selfcode/selfcode-chat.json` | チャットで選択中の opencode セッションとワークスペースの保存先 |
 | `SELFCODE_RESTART_CMD` | `systemctl restart selfcode` | 「リスタート」ボタンが実行するコマンド |
 | `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD` | `opencode` / 自動生成 | opencode サーバーの認証 |
 | `OPENCODE_BIN` | `opencode` | opencode バイナリのパス |

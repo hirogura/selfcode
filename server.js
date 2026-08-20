@@ -22,7 +22,7 @@ const SELF_PASS = process.env.SELFCODE_PASSWORD || "";
 const OC_USER = process.env.OPENCODE_SERVER_USERNAME || "opencode";
 const OC_PASS = process.env.OPENCODE_SERVER_PASSWORD || "";
 const OC_BIN = process.env.OPENCODE_BIN || "opencode";
-const MEMO_FILE = process.env.SELFCODE_MEMO || "/opt/lxd-data/note/selfcode-memo.md";
+const MEMO_FILE = process.env.SELFCODE_MEMO || "/opt/lxd-data/note/selfcode/selfcode-memo.md";
 const RESTART_CMD = process.env.SELFCODE_RESTART_CMD || "systemctl restart selfcode";
 const HIDDEN = new Set(["node_modules", ".git", "dist", "build", ".next", "__pycache__", ".venv", ".cache"]);
 
@@ -295,7 +295,7 @@ app.post("/api/opencode/stop", (req, res) => {
 // パスワード認証・root ログインの一時有効化を行い、OFF で元に戻す。
 // ホストPCの場合はキーリング（D-Bus / Secret Service）を読み取れる環境変数設定も行う。
 // 状態はサーバー再起動後も保持する（ON のまま再起動しても復元対象を失わないように）。
-const SSH_TEMP_STATE_FILE = process.env.SELFCODE_SSH_STATE || "/opt/lxd-data/note/selfcode-ssh.json";
+const SSH_TEMP_STATE_FILE = process.env.SELFCODE_SSH_STATE || "/opt/lxd-data/note/selfcode/selfcode-ssh.json";
 let sshTemp = { on: false, target: null }; // target: { type: "container", name } | { type: "host" }
 
 // コンテナ内用の一時SSH有効化スクリプト（コンテナ内は既存動作のまま）
@@ -855,8 +855,8 @@ app.put("/api/memo", async (req, res, next) => {
 // ================= セッション状態の共有 =================
 // 別のPCから同じ selfcode を開いても同じセッション（ターミナル・チャット選択）に
 // 接続できるよう、ブラウザの localStorage にしか無かった状態をサーバー側にも保存する。
-const TERM_STATE_FILE = process.env.SELFCODE_TERM_STATE || "/opt/lxd-data/note/selfcode-term.json";
-const CHAT_STATE_FILE = process.env.SELFCODE_CHAT_STATE || "/opt/lxd-data/note/selfcode-chat.json";
+const TERM_STATE_FILE = process.env.SELFCODE_TERM_STATE || "/opt/lxd-data/note/selfcode/selfcode-term.json";
+const CHAT_STATE_FILE = process.env.SELFCODE_CHAT_STATE || "/opt/lxd-data/note/selfcode/selfcode-chat.json";
 
 // JSON ファイルを読み込む（無ければ fallback を返す）
 async function readStateFile(file, fallback) {
@@ -915,7 +915,7 @@ app.put("/api/chat/state", async (req, res, next) => {
 // ================= GitHub 連携 =================
 // 設定（ユーザー名・トークン・登録リポジトリ）はサーバー側の JSON に保存し、トークンをブラウザに返さない。
 // git 操作はワークスペース内（コンテナ内ではコンテナ側）で実行する。
-const GITHUB_CONFIG = process.env.SELFCODE_GITHUB_CONFIG || "/opt/lxd-data/note/selfcode-github.json";
+const GITHUB_CONFIG = process.env.SELFCODE_GITHUB_CONFIG || "/opt/lxd-data/note/selfcode/selfcode-github.json";
 let githubCfg = { username: "", token: "", repos: [] };
 
 async function loadGithubConfig() {
