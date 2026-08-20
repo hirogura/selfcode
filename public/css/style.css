@@ -654,6 +654,9 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
   border-radius: 8px;
   background: var(--bg-2);
 }
+.gh-section.collapsed > :not(.gh-sec-head) { display: none; }
+.gh-section.collapsed .gh-sec-head { border-bottom: none; }
+.gh-section.collapsed #gh-settings-toggle { transform: rotate(-90deg); }
 .gh-sec-head {
   display: flex;
   justify-content: space-between;
@@ -761,6 +764,9 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
   white-space: nowrap;
 }
 .gh-repo-del { flex: 0 0 auto; }
+.gh-repo-toggle { flex: 0 0 auto; }
+.gh-repo.collapsed > :not(.gh-repo-head) { display: none; }
+.gh-repo.collapsed .gh-repo-toggle { transform: rotate(-90deg); }
 .gh-repo-meta { margin-top: 4px; font-size: 11.5px; color: var(--fg-dim); word-break: break-all; }
 .gh-repo-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 .gh-repo-output {

@@ -3,6 +3,9 @@
 const GithubPanel = (() => {
   const $ = (id) => document.getElementById(id);
   const KEY = "selfcode.githubVisible";
+  const SETTINGS_COLLAPSED_KEY = "selfcode.settingsCollapsed";
+  const REPOS_COLLAPSED_KEY = "selfcode.reposCollapsed";
+  let collapsedRepos = {};
   let loaded = false;
   let state = { configured: false, username: "", hasToken: false, repos: [] };
   let lastRegistered = [];
@@ -189,6 +192,25 @@ const GithubPanel = (() => {
     loadGitConfig();
   }
 
+  function saveCollapsedRepos() {
+    try { localStorage.setItem(REPOS_COLLAPSED_KEY, JSON.stringify(collapsedRepos)); } catch {}
+  }
+
+  function loadCollapsedRepos() {
+    try { collapsedRepos = JSON.parse(localStorage.getItem(REPOS_COLLAPSED_KEY) || "{}"); } catch { collapsedRepos = {}; }
+  }
+
+  function applyCollapsedState(box) {
+    box.querySelectorAll(".gh-repo").forEach((el) => {
+      const id = el.dataset.id;
+      if (collapsedRepos[id]) {
+        el.classList.add("collapsed");
+        const tog = el.querySelector(".gh-repo-toggle");
+        if (tog) { tog.textContent = "▸"; tog.title = "ひらく"; }
+      }
+    });
+  }
+
   async function renderRepos() {
     const box = $("gh-repos");
     box.innerHTML = '<div class="gh-loading">読み込み中…</div>';
@@ -201,6 +223,7 @@ const GithubPanel = (() => {
         return;
       }
       for (const r of list) box.appendChild(repoItem(r));
+      applyCollapsedState(box);
     } catch (e) {
       box.innerHTML = '<div class="gh-empty err">' + esc(e.message) + "</div>";
     }
@@ -221,6 +244,7 @@ const GithubPanel = (() => {
       '<span class="gh-repo-name">📁 ' + esc(r.name) + "</span>" +
       '<span class="gh-repo-path" title="' + esc(r.path) + '">' + esc(r.path) + "</span>" +
       '<button class="btn small gh-repo-del" title="登録を解除（ファイルは削除されません）">×</button>' +
+      '<button class="btn small gh-repo-toggle" title="たたむ">▾</button>' +
       "</div>" +
       '<div class="gh-repo-meta-row">' +
       '<span class="gh-branch-btn" data-act="branch" title="ブランチを切替・作成">branch: ' + esc(r.branch || "—") + ' ▾</span>' +
@@ -253,6 +277,17 @@ const GithubPanel = (() => {
     const del = e.target.closest(".gh-repo-del");
     if (del) {
       removeRepo(del.closest(".gh-repo").dataset.id);
+      return;
+    }
+    const tog = e.target.closest(".gh-repo-toggle");
+    if (tog) {
+      const item = tog.closest(".gh-repo");
+      const id = item.dataset.id;
+      const collapsed = item.classList.toggle("collapsed");
+      tog.textContent = collapsed ? "▸" : "▾";
+      tog.title = collapsed ? "ひらく" : "たたむ";
+      collapsedRepos[id] = collapsed;
+      saveCollapsedRepos();
       return;
     }
     const run = e.target.closest(".gh-commit-run");
@@ -486,6 +521,8 @@ const GithubPanel = (() => {
     if (!confirm("リポジトリの登録を解除しますか？\n（ローカルのファイルは削除されません）")) return;
     try {
       await API.github.remove(id);
+      delete collapsedRepos[id];
+      saveCollapsedRepos();
       renderRepos();
       toast("登録を解除しました");
     } catch (e) {
@@ -588,6 +625,7 @@ const GithubPanel = (() => {
   }
 
   function init() {
+    loadCollapsedRepos();
     $("btn-github").onclick = toggle;
     $("btn-github-close").onclick = hide;
     $("gh-save").onclick = saveSettings;
@@ -601,6 +639,21 @@ const GithubPanel = (() => {
     $("gh-register-existing").onclick = registerExisting;
     $("gh-repos-refresh").onclick = renderRepos;
     $("gh-repos").addEventListener("click", onReposClick);
+    $("gh-settings-toggle").onclick = () => {
+      const sec = $("gh-settings-section");
+      const collapsed = sec.classList.toggle("collapsed");
+      $("gh-settings-toggle").textContent = collapsed ? "▸" : "▾";
+      $("gh-settings-toggle").title = collapsed ? "ひらく" : "たたむ";
+      try { localStorage.setItem(SETTINGS_COLLAPSED_KEY, collapsed ? "1" : "0"); } catch {}
+    };
+    {
+      const collapsed = localStorage.getItem(SETTINGS_COLLAPSED_KEY) === "1";
+      if (collapsed) {
+        $("gh-settings-section").classList.add("collapsed");
+        $("gh-settings-toggle").textContent = "▸";
+        $("gh-settings-toggle").title = "ひらく";
+      }
+    }
     // 初回表示時に読み込んでおく（ボタンで開く前に設定済みかを知るため）。
     // 成功したら表示内容も描画しておく（開いたときに refresh しなくて済む）。
     API.github.status()
