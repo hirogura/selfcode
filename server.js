@@ -21,7 +21,7 @@ const SELF_USER = process.env.SELFCODE_USERNAME || "selfcode";
 const SELF_PASS = process.env.SELFCODE_PASSWORD || "";
 const OC_USER = process.env.OPENCODE_SERVER_USERNAME || "opencode";
 const OC_PASS = process.env.OPENCODE_SERVER_PASSWORD || "";
-const OC_BIN = process.env.OPENCODE_BIN || "opencode";
+const OC_BIN_RAW = process.env.OPENCODE_BIN || "opencode";
 const MEMO_FILE = process.env.SELFCODE_MEMO || "/opt/lxd-data/note/selfcode/selfcode-memo.md";
 const RESTART_CMD = process.env.SELFCODE_RESTART_CMD || "systemctl restart selfcode";
 const HIDDEN = new Set(["node_modules", ".git", "dist", "build", ".next", "__pycache__", ".venv", ".cache"]);
@@ -113,15 +113,25 @@ function findFreePort() {
 async function startOpencode() {
   if (oc.manualStop) return; // 手動停止済みなら再起動しない
   if (oc.child) return; // 既に起動済み
+  // root で動いている場合、PATH にユーザーの ~/.opencode/bin が含まれないため、
+  // findBin でフルパスを解決する
+  const termHome = TERM_USER ? userHomeOf(TERM_USER) : null;
+  const binPath = findBin(OC_BIN_RAW, process.env.PATH || "", termHome) || OC_BIN_RAW;
   const port = await findFreePort();
   if (!oc.password) oc.password = crypto.randomBytes(24).toString("base64url");
   const env = { ...process.env, OPENCODE_SERVER_PASSWORD: oc.password, OPENCODE_SERVER_USERNAME: OC_USER };
-  const child = spawn(OC_BIN, ["serve", "--hostname", "127.0.0.1", "--port", String(port), "--print-logs"], {
+  const child = spawn(binPath, ["serve", "--hostname", "127.0.0.1", "--port", String(port), "--print-logs"], {
     env,
     cwd: ROOT,
     stdio: ["ignore", "pipe", "pipe"],
   });
   oc.child = child;
+  child.on("error", (err) => {
+    console.error(`[selfcode] opencode 起動エラー: ${err.message}`);
+    oc.ready = false;
+    oc.port = null;
+    oc.child = null;
+  });
   child.stdout.on("data", (d) => {
     const m = String(d).match(/listening on (http:\/\/[^\s]+)/);
     if (m) {
@@ -1842,7 +1852,9 @@ function makeShellEnv() {
   const env = { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor" };
   // systemd サービス等では $HOME が未設定の場合があるため補完する（git config --global などが動くように）
   if (!env.HOME) env.HOME = os.homedir();
-  const ocBin = path.dirname(process.env.OPENCODE_BIN && path.isAbsolute(process.env.OPENCODE_BIN) ? process.env.OPENCODE_BIN : OC_BIN);
+  const termHome = TERM_USER ? userHomeOf(TERM_USER) : null;
+  const resolvedOcBin = findBin(OC_BIN_RAW, process.env.PATH || "", termHome) || OC_BIN_RAW;
+  const ocBin = path.dirname(process.env.OPENCODE_BIN && path.isAbsolute(process.env.OPENCODE_BIN) ? process.env.OPENCODE_BIN : resolvedOcBin);
   const ocDir = path.dirname(process.execPath);
   for (const dir of [ocBin, ocDir]) {
     if (dir && dir !== "." && !env.PATH.split(":").includes(dir)) env.PATH = `${dir}:${env.PATH}`;
