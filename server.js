@@ -1324,7 +1324,7 @@ app.post("/api/github/repos/:id/action", async (req, res, next) => {
     const action = String(req.body.action || "");
     const repo = githubCfg.repos.find((r) => r.id === id);
     if (!repo) return res.status(404).json({ error: "リポジトリが見つかりません" });
-    if (!["status", "fetch", "pull", "log", "commit", "cancel", "push"].includes(action)) {
+    if (!["status", "fetch", "pull", "log", "commit", "cancel", "push", "branch", "merge"].includes(action)) {
       return res.status(400).json({ error: "不明な操作です" });
     }
     if (action === "status") {
@@ -1364,6 +1364,37 @@ app.post("/api/github/repos/:id/action", async (req, res, next) => {
       const r = await runGit(repo.path, ["log", "--oneline", "-10"], 60000);
       const output = (r.stdout + r.stderr).trim();
       return res.json({ ok: r.code === 0, action, code: r.code, output });
+    }
+    if (action === "branch") {
+      const target = String(req.body.branch || "").trim();
+      if (!target) {
+        // ブランチ一覧を返す
+        const r = await runGit(repo.path, ["branch", "--no-color"], 10000);
+        if (r.code !== 0) return res.json({ ok: false, action, output: (r.stdout + r.stderr).trim() });
+        const branches = (r.stdout || "").split("\n").map((l) => l.replace(/^\*?\s+/, "").trim()).filter(Boolean);
+        return res.json({ ok: true, action, branches });
+      }
+      // ブランチ切替 or 作成
+      // 既存ブランチか確認
+      const listR = await runGit(repo.path, ["branch", "--no-color"], 10000);
+      const branches = (listR.stdout || "").split("\n").map((l) => l.replace(/^\*?\s+/, "").trim()).filter(Boolean);
+      if (branches.includes(target)) {
+        // 切替
+        const swR = await runGit(repo.path, ["checkout", target], 30000);
+        const output = (swR.stdout + swR.stderr).trim();
+        return res.json({ ok: swR.code === 0, action, output });
+      }
+      // 新規作成して切替
+      const crR = await runGit(repo.path, ["checkout", "-b", target], 30000);
+      const output = (crR.stdout + crR.stderr).trim();
+      return res.json({ ok: crR.code === 0, action, output });
+    }
+    if (action === "merge") {
+      const target = String(req.body.branch || "").trim();
+      if (!target) return res.status(400).json({ error: "マージ元ブランチを指定してください" });
+      const r = await runGit(repo.path, ["merge", target], 60000);
+      const output = (r.stdout + r.stderr).trim();
+      return res.json({ ok: r.code === 0, action, output });
     }
     if (action === "pull") {
       let r = await runGit(repo.path, ["pull"], 120000);

@@ -104,6 +104,8 @@ const API = (() => {
       add: (url, dir) => API.post("/api/github/repos", { url, dir }),
       addExisting: (p, init) => API.post("/api/github/repos/existing", { path: p, init: !!init }),
       action: (id, action, message) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/action", { action, message }),
+      branch: (id, branch) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/action", { action: "branch", branch }),
+      merge: (id, branch) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/action", { action: "merge", branch }),
       addRemote: (id, url, branch) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/remote", { url, branch }),
       remove: (id) => API.del("/api/github/repos/" + encodeURIComponent(id)),
     },
