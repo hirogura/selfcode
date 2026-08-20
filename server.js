@@ -1324,7 +1324,7 @@ app.post("/api/github/repos/:id/action", async (req, res, next) => {
     const action = String(req.body.action || "");
     const repo = githubCfg.repos.find((r) => r.id === id);
     if (!repo) return res.status(404).json({ error: "リポジトリが見つかりません" });
-    if (!["status", "fetch", "pull", "log", "commit", "cancel", "push", "branch", "merge"].includes(action)) {
+    if (!["status", "fetch", "pull", "log", "commit", "cancel", "push", "branch", "cleanup"].includes(action)) {
       return res.status(400).json({ error: "不明な操作です" });
     }
     if (action === "status") {
@@ -1389,12 +1389,43 @@ app.post("/api/github/repos/:id/action", async (req, res, next) => {
       const output = (crR.stdout + crR.stderr).trim();
       return res.json({ ok: crR.code === 0, action, output });
     }
-    if (action === "merge") {
-      const target = String(req.body.branch || "").trim();
-      if (!target) return res.status(400).json({ error: "マージ元ブランチを指定してください" });
-      const r = await runGit(repo.path, ["merge", target], 60000);
-      const output = (r.stdout + r.stderr).trim();
-      return res.json({ ok: r.code === 0, action, output });
+    if (action === "cleanup") {
+      // git fetch --prune でリモートの最新状態を取得
+      await runGit(repo.path, ["fetch", "--prune"], 60000);
+      // 現在チェックアウト中のブランチを取得
+      const curBr = await runGit(repo.path, ["branch", "--show-current"], 5000);
+      const currentBranch = (curBr.stdout || "").trim();
+      // ブランチ一覧を取得（追跡情報を含む）
+      const listR = await runGit(repo.path, ["branch", "-vv", "--no-color"], 10000);
+      if (listR.code !== 0) {
+        return res.json({ ok: false, action, output: (listR.stdout + listR.stderr).trim() });
+      }
+      // [origin/...: gone] となっているブランチを検出
+      const lines = (listR.stdout || "").split("\n");
+      const toDelete = [];
+      for (const line of lines) {
+        const m = line.match(/^\*?\s+(\S+)\s+\S+\s+\[origin\/[^:]+:\s+gone\]/);
+        if (m) {
+          const branchName = m[1];
+          if (branchName !== currentBranch) toDelete.push(branchName);
+        }
+      }
+      if (!toDelete.length) {
+        return res.json({ ok: true, action, deleted: [], output: "削除するブランチはありません" });
+      }
+      const deleted = [];
+      const errors = [];
+      for (const b of toDelete) {
+        const r = await runGit(repo.path, ["branch", "-d", b], 30000);
+        if (r.code === 0) {
+          deleted.push(b);
+        } else {
+          errors.push(b + ": " + (r.stdout + r.stderr).trim());
+        }
+      }
+      const output = deleted.length ? "削除: " + deleted.join(", ") : "";
+      const errOutput = errors.length ? "\n削除失敗:\n" + errors.join("\n") : "";
+      return res.json({ ok: true, action, deleted, output: (output + errOutput).trim() || "完了" });
     }
     if (action === "pull") {
       let r = await runGit(repo.path, ["pull"], 120000);

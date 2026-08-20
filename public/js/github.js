@@ -185,7 +185,7 @@ const GithubPanel = (() => {
       "</div>" +
       '<div class="gh-repo-meta-row">' +
       '<span class="gh-branch-btn" data-act="branch" title="ブランチを切替・作成">branch: ' + esc(r.branch || "—") + ' ▾</span>' +
-      '<button class="btn small gh-merge-btn" data-act="merge" title="他のブランチをマージ">マージ</button>' +
+      '<button class="btn small gh-cleanup-btn" data-act="cleanup" title="リモートで削除済みのローカルブランチを一括削除">ブランチ自動整理</button>' +
       "</div>" +
       (meta ? '<div class="gh-repo-meta">' + esc(meta) + "</div>" : "") +
       '<div class="gh-repo-actions">' +
@@ -236,11 +236,11 @@ const GithubPanel = (() => {
       showBranchDropdown(id, branchBtn);
       return;
     }
-    // マージボタン
-    const mergeBtn = e.target.closest(".gh-merge-btn");
-    if (mergeBtn) {
-      const id = mergeBtn.closest(".gh-repo").dataset.id;
-      showMergeDialog(id);
+    // ブランチ自動整理ボタン
+    const cleanupBtn = e.target.closest(".gh-cleanup-btn");
+    if (cleanupBtn) {
+      const id = cleanupBtn.closest(".gh-repo").dataset.id;
+      doCleanupBranches(id);
       return;
     }
     const btn = e.target.closest(".gh-repo-actions .btn");
@@ -369,47 +369,28 @@ const GithubPanel = (() => {
     });
   }
 
-  function showMergeDialog(id) {
-    const overlay = document.createElement("div");
-    overlay.className = "modal";
-    overlay.innerHTML =
-      '<div class="modal-box" style="min-width:380px">' +
-        '<div class="modal-head"><span>ブランチをマージ</span></div>' +
-        '<div style="padding:12px;font-size:13px;line-height:1.6">' +
-          '<div style="margin-bottom:8px;color:var(--fg-dim)">マージ元のブランチ名を入力してください。</div>' +
-          '<label style="display:block;font-size:11px;color:var(--fg-dim)">ブランチ名</label>' +
-          '<input id="gh-merge-src" type="text" style="width:100%;box-sizing:border-box;padding:5px 8px;margin-top:2px;font-size:13px;background:#000;color:#fff;border:1px solid var(--border)" placeholder="例: feature/xxx" autocomplete="off">' +
-        '</div>' +
-        '<div style="display:flex;justify-content:flex-end;gap:6px;padding:8px 12px;border-top:1px solid var(--border)">' +
-          '<button id="gh-merge-cancel" class="btn small">キャンセル</button>' +
-          '<button id="gh-merge-ok" class="btn small primary">マージ</button>' +
-        '</div>' +
-      '</div>';
-    document.body.appendChild(overlay);
-    const srcInput = document.getElementById("gh-merge-src");
-    srcInput.focus();
-    function close() { overlay.remove(); }
-    overlay.querySelector("#gh-merge-cancel").onclick = close;
-    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
-    overlay.querySelector("#gh-merge-ok").onclick = async () => {
-      const branch = srcInput.value.trim();
-      if (!branch) { toast("ブランチ名を入力してください", true); return; }
-      const okBtn = document.getElementById("gh-merge-ok");
-      okBtn.disabled = true;
-      okBtn.textContent = "マージ中…";
-      try {
-        const res = await API.github.merge(id, branch);
-        close();
-        if (res.ok) {
-          toast("マージしました: " + branch);
+  async function doCleanupBranches(id) {
+    const item = $("gh-repos").querySelector(`.gh-repo[data-id="${CSS.escape(id)}"]`);
+    const btn = item && item.querySelector(".gh-cleanup-btn");
+    if (btn) { btn.disabled = true; btn.textContent = "整理中…"; }
+    try {
+      const res = await API.github.cleanupBranches(id);
+      if (res.ok) {
+        const deleted = res.deleted || [];
+        if (deleted.length) {
+          toast("削除しました: " + deleted.join(", "));
         } else {
-          toast(res.output || "マージに失敗しました", true);
+          toast("削除するブランチはありません");
         }
-        renderRepos();
-      } catch (e2) {
-        toast(e2.message, true);
+      } else {
+        toast(res.output || "ブランチ整理に失敗しました", true);
       }
-    };
+      renderRepos();
+    } catch (e2) {
+      toast(e2.message, true);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = "ブランチ自動整理"; }
+    }
   }
 
   function isPullRemoteError(output) {
