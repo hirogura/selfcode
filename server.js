@@ -1831,8 +1831,10 @@ app.post("/api/restart", (req, res) => {
 const UPDATE_SCRIPT = `
 set -e
 git config --global --add safe.directory '${__dirname}' >/dev/null 2>&1 || true
-curl -fsSL https://raw.githubusercontent.com/hirogura/selfcode/main/install-selfcode.sh -o /tmp/install-selfcode.sh
-bash /tmp/install-selfcode.sh
+update_tmp="$(mktemp /tmp/selfcode-install-XXXXXX.sh)"
+trap 'rm -f "$update_tmp"' EXIT
+curl -fsSL https://raw.githubusercontent.com/hirogura/selfcode/main/install-selfcode.sh -o "$update_tmp"
+bash "$update_tmp"
 `;
 
 app.post("/api/update", async (req, res, next) => {
