@@ -1825,15 +1825,14 @@ app.post("/api/restart", (req, res) => {
   });
 });
 
-// アップデート: 必要パッケージの導入 → 公式インストールスクリプトの取得 → 実行。
+// アップデート: 公式インストールスクリプトの取得 → 実行。
 // スクリプト内で git pull / npm install が行われ、完了後に「リスタート」で新コードへ切り替わる。
+// root 以外の所有者リポジトリでも動くよう safe.directory を事前に登録する。
 const UPDATE_SCRIPT = `
 set -e
-SUDO=""
-if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo"; fi
-$SUDO apt install -y git curl nodejs npm
+git config --global --add safe.directory '${__dirname}' >/dev/null 2>&1 || true
 curl -fsSL https://raw.githubusercontent.com/hirogura/selfcode/main/install-selfcode.sh -o /tmp/install-selfcode.sh
-$SUDO bash /tmp/install-selfcode.sh
+bash /tmp/install-selfcode.sh
 `;
 
 app.post("/api/update", async (req, res, next) => {
