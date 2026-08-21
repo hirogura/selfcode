@@ -575,7 +575,8 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
 }
 #toast.err { border-color: var(--red); color: var(--red); }
 
-#restart-overlay {
+#restart-overlay,
+#update-overlay {
   position: fixed;
   inset: 0;
   z-index: 300;
@@ -584,9 +585,12 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
   align-items: center;
   justify-content: center;
 }
-#restart-overlay.hidden { display: none; }
+#restart-overlay.hidden, #update-overlay.hidden { display: none; }
 .restart-box { text-align: center; }
 .restart-box p { margin: 16px 0; color: var(--fg-dim); }
+#update-message { white-space: pre-line; }
+#update-message.err { color: var(--red); }
+.update-actions { display: flex; gap: 8px; justify-content: center; }
 .spinner {
   width: 36px;
   height: 36px;

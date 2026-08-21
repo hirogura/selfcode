@@ -93,6 +93,7 @@ const API = (() => {
       put: (content) => API.put("/api/memo", { content }),
     },
     restart: () => API.post("/api/restart", {}, undefined, 5000),
+    update: () => API.post("/api/update", {}, undefined, 960000),
 
     github: {
       status: () => API.get("/api/github/status"),

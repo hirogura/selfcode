@@ -79,6 +79,7 @@ PORT=3339 npm start
 | `SELFCODE_TERM_STATE` | `/opt/lxd-data/note/selfcode/selfcode-term.json` | ターミナルのペイン構成（分割・cwd・id）の保存先。別のPCから同じ selfcode を開いても同じターミナルプロセスに再接続するために使う |
 | `SELFCODE_CHAT_STATE` | `/opt/lxd-data/note/selfcode/selfcode-chat.json` | チャットで選択中の opencode セッションとワークスペースの保存先 |
 | `SELFCODE_RESTART_CMD` | `systemctl restart selfcode` | 「リスタート」ボタンが実行するコマンド |
+| `SELFCODE_UPDATE_TIMEOUT` | `900000`（15分） | 「アップデート」ボタンの更新処理タイムアウト（ミリ秒） |
 | `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD` | `opencode` / 自動生成 | opencode サーバーの認証 |
 | `OPENCODE_BIN` | `opencode` | opencode バイナリのパス |
 

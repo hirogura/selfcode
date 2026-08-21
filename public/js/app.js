@@ -1279,6 +1279,7 @@ const App = (() => {
   }
 
   let sshTempOn = false; // 「一時SSH」ボタンの状態（/api/ssh-temp と同期）
+  let updateRunning = false; // アップデート実行中フラグ（二重実行を防ぐ）
 
   // 「一時SSH」ボタン: agy などの OAuth 認証を手元 PC から行えるよう、
   // 選択中のコンテナ（未選択ならホスト）の SSH パスワード認証を一時的に有効化する
@@ -1773,8 +1774,8 @@ const App = (() => {
   }
 
   // ---- selfcode 再起動 ----
-  async function restartSelfcode() {
-    if (!confirm("selfcode を再起動しますか？\n未保存の変更は失われる場合があります。")) return;
+  async function restartSelfcode(skipConfirm) {
+    if (!skipConfirm && !confirm("selfcode を再起動しますか？\n未保存の変更は失われる場合があります。")) return;
     try {
       await API.restart();
     } catch (e) {
@@ -1785,6 +1786,72 @@ const App = (() => {
       }
     }
     showRestartOverlay();
+  }
+
+  // ---- selfcode アップデート ----
+  async function updateSelfcode() {
+    if (updateRunning) return;
+    if (!confirm("selfcode を最新版に更新しますか？\n完了まで数分かかることがあります。")) return;
+    updateRunning = true;
+    const ov = showUpdateOverlay();
+    try {
+      await API.update();
+      ov.done();
+    } catch (e) {
+      ov.error(e.message || String(e));
+    } finally {
+      updateRunning = false;
+    }
+  }
+
+  function showUpdateOverlay() {
+    let ov = $("update-overlay");
+    if (!ov) {
+      ov = document.createElement("div");
+      ov.id = "update-overlay";
+      ov.className = "hidden";
+      ov.innerHTML =
+        '<div class="restart-box"><div class="spinner" id="update-spinner"></div>' +
+        '<p id="update-message">アップデート中…（完了まで数分かかることがあります）</p>' +
+        '<div class="update-actions">' +
+        '<button id="btn-update-restart" class="btn primary hidden"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg><span>リスタート</span></button>' +
+        '<button id="btn-update-close" class="btn hidden">閉じる</button></div></div>';
+      document.body.appendChild(ov);
+    }
+    const spinner = $("update-spinner");
+    const msg = $("update-message");
+    const restartBtn = $("btn-update-restart");
+    const closeBtn = $("btn-update-close");
+    spinner.classList.remove("hidden");
+    msg.classList.remove("err");
+    msg.textContent = "アップデート中…（完了まで数分かかることがあります）";
+    restartBtn.classList.add("hidden");
+    closeBtn.classList.add("hidden");
+    restartBtn.onclick = () => {
+      hideUpdateOverlay();
+      restartSelfcode(true);
+    };
+    closeBtn.onclick = hideUpdateOverlay;
+    ov.classList.remove("hidden");
+    return {
+      done() {
+        spinner.classList.add("hidden");
+        msg.textContent = "アップデートが完了しました。「リスタート」ボタンを押してください。";
+        restartBtn.classList.remove("hidden");
+        closeBtn.classList.remove("hidden");
+      },
+      error(m) {
+        spinner.classList.add("hidden");
+        msg.classList.add("err");
+        msg.textContent = m + "\n（詳細は journalctl -u selfcode を確認してください）";
+        closeBtn.classList.remove("hidden");
+      },
+    };
+  }
+
+  function hideUpdateOverlay() {
+    const ov = $("update-overlay");
+    if (ov) ov.classList.add("hidden");
   }
 
   function showRestartOverlay() {
@@ -1878,7 +1945,8 @@ const App = (() => {
     $("btn-memo").onclick = toggleMemo;
     $("btn-memo-save").onclick = saveMemo;
     $("btn-memo-close").onclick = hideMemoPanel;
-    $("btn-restart").onclick = restartSelfcode;
+    $("btn-restart").onclick = () => restartSelfcode();
+    $("btn-update").onclick = updateSelfcode;
 
     els.memoInput.addEventListener("keydown", (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {

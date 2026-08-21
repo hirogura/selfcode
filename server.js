@@ -24,6 +24,7 @@ const OC_PASS = process.env.OPENCODE_SERVER_PASSWORD || "";
 const OC_BIN_RAW = process.env.OPENCODE_BIN || "opencode";
 const MEMO_FILE = process.env.SELFCODE_MEMO || "/opt/lxd-data/note/selfcode/selfcode-memo.md";
 const RESTART_CMD = process.env.SELFCODE_RESTART_CMD || "systemctl restart selfcode";
+const UPDATE_TIMEOUT_MS = Number(process.env.SELFCODE_UPDATE_TIMEOUT || 900000); // アップデートのタイムアウト（既定 15 分）
 const HIDDEN = new Set(["node_modules", ".git", "dist", "build", ".next", "__pycache__", ".venv", ".cache"]);
 
 // プロセスが root で動いているか（systemd サービスは root で起動する）
@@ -1822,6 +1823,29 @@ app.post("/api/restart", (req, res) => {
     // ここまで生き残っている = 再起動に失敗（成功時は systemctl が自分のプロセスを停止する）
     if (!res.headersSent) res.status(500).json({ error: "再起動に失敗しました (exit " + code + "): " + out.trim() });
   });
+});
+
+// アップデート: 必要パッケージの導入 → 公式インストールスクリプトの取得 → 実行。
+// スクリプト内で git pull / npm install が行われ、完了後に「リスタート」で新コードへ切り替わる。
+const UPDATE_SCRIPT = `
+set -e
+SUDO=""
+if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo"; fi
+$SUDO apt install -y git curl nodejs npm
+curl -fsSL https://raw.githubusercontent.com/hirogura/selfcode/main/install-selfcode.sh -o /tmp/install-selfcode.sh
+$SUDO bash /tmp/install-selfcode.sh
+`;
+
+app.post("/api/update", async (req, res, next) => {
+  console.log("[selfcode] update requested");
+  try {
+    const out = await runCmd("bash", ["-c", UPDATE_SCRIPT], UPDATE_TIMEOUT_MS);
+    const log = out.toString("utf8").trim();
+    console.log("[selfcode] update finished\n" + log.split("\n").slice(-10).join("\n"));
+    res.json({ ok: true, log });
+  } catch (e) {
+    res.status(500).json({ error: "アップデートに失敗しました: " + (e.message || e) });
+  }
 });
 
 app.use("/monaco/vs", express.static(path.join(__dirname, "node_modules/monaco-editor/min/vs")));
