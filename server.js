@@ -1551,6 +1551,23 @@ app.post("/api/github/repos/:id/remote", async (req, res, next) => {
       const addR = await runGit(repo.path, ["remote", "add", "origin", url], 10000);
       if (addR.code !== 0) return res.json({ ok: false, output: (addR.stdout + addR.stderr).trim() });
     }
+    // 強制同期オプション: チェックされたステップを対象フォルダで順番に実行
+    const fsOpt = (req.body && typeof req.body.forceSync === "object" && req.body.forceSync) || {};
+    const steps = [];
+    if (fsOpt.fetch) steps.push({ n: "#1", args: ["fetch", "origin"], timeout: 180000 });
+    if (fsOpt.checkout) steps.push({ n: "#2", args: ["checkout", "-B", branch, "origin/" + branch], timeout: 30000 });
+    if (fsOpt.reset) steps.push({ n: "#3", args: ["reset", "--hard", "origin/" + branch], timeout: 30000 });
+    let syncOutput = "";
+    let syncFailed = false;
+    for (const st of steps) {
+      const r = await runGit(repo.path, st.args, st.timeout);
+      const o = ((r.stdout || "") + (r.stderr || "")).trim();
+      syncOutput += st.n + " $ git " + st.args.join(" ") + "\n" + (o || "(完了)") + "\n\n";
+      if (r.code !== 0) { syncFailed = true; break; }
+    }
+    if (syncFailed) {
+      return res.json({ ok: false, output: ("リモートは設定しましたが、強制同期に失敗しました:\n\n" + syncOutput).trim() });
+    }
     // トラッキングブランチを設定（現在のブランチが存在する場合のみ）
     const brR = await runGit(repo.path, ["branch", "--show-current"], 5000);
     const curBranch = (brR.stdout || "").trim();
@@ -1562,7 +1579,7 @@ app.post("/api/github/repos/:id/remote", async (req, res, next) => {
     // repoのURLも更新
     repo.url = url;
     await saveGithubConfig();
-    res.json({ ok: true, output: upOutput || ("リモートを設定しました: origin → " + url + "\nトラッキング: origin/" + branch) });
+    res.json({ ok: true, output: (syncOutput + (upOutput || ("リモートを設定しました: origin → " + url + "\nトラッキング: origin/" + branch))).trim() });
   } catch (e) {
     next(e);
   }

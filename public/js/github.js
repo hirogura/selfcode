@@ -346,6 +346,12 @@ const GithubPanel = (() => {
           '<input id="gh-remote-url" type="text" style="width:100%;box-sizing:border-box;padding:5px 8px;margin-top:2px;font-size:13px;background:#000;color:#fff;border:1px solid var(--border)" placeholder="https://github.com/user/repo.git" autocomplete="off">' +
           '<label style="display:block;margin-top:8px;font-size:11px;color:var(--fg-dim)">ブランチ名</label>' +
           '<input id="gh-remote-branch" type="text" style="width:100%;box-sizing:border-box;padding:5px 8px;margin-top:2px;font-size:13px;background:#000;color:#fff;border:1px solid var(--border)" placeholder="main" autocomplete="off">' +
+          '<div style="margin-top:10px;padding:8px;border:1px solid var(--border)">' +
+            '<div style="font-size:11px;color:var(--fg-dim);margin-bottom:5px">URLとブランチ指定でも失敗する場合は強制同期を実行（チェックした処理を対象フォルダで順番に実行します）</div>' +
+            '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input id="gh-force-fetch" type="checkbox" checked> #1 リモートの最新情報を取得（git fetch origin）</label>' +
+            '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-top:4px"><input id="gh-force-checkout" type="checkbox" checked> #2 ブランチを main に切り替え・強制設定（git checkout -B main origin/main）</label>' +
+            '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-top:4px"><input id="gh-force-reset" type="checkbox" checked> #3 ローカルファイルをリモートの内容で上書き（git reset --hard origin/main）</label>' +
+          '</div>' +
         '</div>' +
         '<div style="display:flex;justify-content:flex-end;gap:6px;padding:8px 12px;border-top:1px solid var(--border)">' +
           '<button id="gh-remote-cancel" class="btn small">キャンセル</button>' +
@@ -365,11 +371,16 @@ const GithubPanel = (() => {
       const url = urlInput.value.trim();
       const branch = branchInput.value.trim() || "main";
       if (!url) { toast("リモートURLを入力してください", true); return; }
+      const forceSync = {
+        fetch: $("gh-force-fetch").checked,
+        checkout: $("gh-force-checkout").checked,
+        reset: $("gh-force-reset").checked,
+      };
       const okBtn = $("gh-remote-ok");
       okBtn.disabled = true;
       okBtn.textContent = "設定中…";
       try {
-        const rRes = await API.github.addRemote(id, url, branch);
+        const rRes = await API.github.addRemote(id, url, branch, forceSync);
         if (!rRes.ok) { toast(rRes.output || "リモート設定に失敗しました", true); return; }
         close();
         toast("リモートを設定しました。pullを再実行します…");

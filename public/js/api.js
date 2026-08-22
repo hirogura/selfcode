@@ -107,7 +107,7 @@ const API = (() => {
       action: (id, action, message) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/action", { action, message }),
       branch: (id, branch) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/action", { action: "branch", branch }),
       cleanupBranches: (id) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/action", { action: "cleanup" }),
-      addRemote: (id, url, branch) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/remote", { url, branch }),
+      addRemote: (id, url, branch, forceSync) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/remote", { url, branch, forceSync: forceSync || null }),
       remove: (id) => API.del("/api/github/repos/" + encodeURIComponent(id)),
       gitConfig: () => API.get("/api/github/git-config"),
       saveGitConfig: (name, email) => API.put("/api/github/git-config", { name, email }),
