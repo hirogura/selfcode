@@ -333,15 +333,28 @@ const GithubPanel = (() => {
     repoAction(id, btn.dataset.act);
   }
 
-  function showRemoteDialog(id, repo, pullOutput) {
+  function showRemoteDialog(id, repo, pullOutput, defaultBranch) {
     const overlay = document.createElement("div");
     overlay.className = "modal";
+    const mBadBranch = String(pullOutput || "").match(/couldn't find remote ref\s+(\S+)|no such ref was fetched[\s\S]*?refs\/heads\/(\S+)/i);
+    const badBranch = mBadBranch ? (mBadBranch[1] || mBadBranch[2]) : "";
+    const hint = (badBranch || defaultBranch)
+      ? '<div style="margin-bottom:8px;color:var(--fg-dim)">' +
+        (badBranch
+          ? 'ローカルのブランチ <b>' + esc(badBranch) + '</b> はリモートに存在しません。'
+          : "") +
+        (defaultBranch && defaultBranch !== badBranch
+          ? 'リモートの既定ブランチは <b>' + esc(defaultBranch) + '</b> のようです。'
+          : "") +
+        'ブランチ名を確認して「強制同期」で同期してください。</div>'
+      : "";
     overlay.innerHTML =
       '<div class="modal-box" style="min-width:400px">' +
         '<div class="modal-head"><span>リモートを設定</span></div>' +
         '<div style="padding:12px;font-size:13px;line-height:1.6">' +
           '<div style="margin-bottom:8px;color:var(--fg-dim)">pullに失敗しました。リモートリポジトリのURLを設定してください。</div>' +
-          '<div style="margin-bottom:4px;font-size:11px;color:var(--fg-dim)">' + esc(pullOutput || "") + '</div>' +
+          hint +
+          '<div style="margin-bottom:4px;font-size:11px;color:var(--fg-dim);max-height:120px;overflow:auto;white-space:pre-wrap">' + esc(pullOutput || "") + '</div>' +
           '<label style="display:block;margin-top:8px;font-size:11px;color:var(--fg-dim)">リモートURL</label>' +
           '<input id="gh-remote-url" type="text" style="width:100%;box-sizing:border-box;padding:5px 8px;margin-top:2px;font-size:13px;background:#000;color:#fff;border:1px solid var(--border)" placeholder="https://github.com/user/repo.git" autocomplete="off">' +
           '<label style="display:block;margin-top:8px;font-size:11px;color:var(--fg-dim)">ブランチ名</label>' +
@@ -349,8 +362,8 @@ const GithubPanel = (() => {
           '<div style="margin-top:10px;padding:8px;border:1px solid var(--border)">' +
             '<div style="font-size:11px;color:var(--fg-dim);margin-bottom:5px">URLとブランチ指定でも失敗する場合は強制同期を実行（チェックした処理を対象フォルダで順番に実行します）</div>' +
             '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input id="gh-force-fetch" type="checkbox" checked> #1 リモートの最新情報を取得（git fetch origin）</label>' +
-            '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-top:4px"><input id="gh-force-checkout" type="checkbox" checked> #2 ブランチを main に切り替え・強制設定（git checkout -B main origin/main）</label>' +
-            '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-top:4px"><input id="gh-force-reset" type="checkbox" checked> #3 ローカルファイルをリモートの内容で上書き（git reset --hard origin/main）</label>' +
+            '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-top:4px"><input id="gh-force-checkout" type="checkbox" checked> <span id="gh-force-checkout-label"></span></label>' +
+            '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-top:4px"><input id="gh-force-reset" type="checkbox" checked> <span id="gh-force-reset-label"></span></label>' +
           '</div>' +
         '</div>' +
         '<div style="display:flex;justify-content:flex-end;gap:6px;padding:8px 12px;border-top:1px solid var(--border)">' +
@@ -362,7 +375,16 @@ const GithubPanel = (() => {
     const urlInput = $("gh-remote-url");
     const branchInput = $("gh-remote-branch");
     urlInput.value = (repo && repo.url) || "";
-    branchInput.value = "main";
+    branchInput.value = defaultBranch || "main";
+    function syncLabels() {
+      const b = branchInput.value.trim() || "main";
+      $("gh-force-checkout-label").textContent =
+        "#2 ブランチを " + b + " に切り替え・強制設定（git checkout -B " + b + " origin/" + b + "）";
+      $("gh-force-reset-label").textContent =
+        "#3 ローカルファイルをリモートの内容で上書き（git reset --hard origin/" + b + "）";
+    }
+    syncLabels();
+    branchInput.addEventListener("input", syncLabels);
     urlInput.focus();
     function close() { overlay.remove(); }
     overlay.querySelector("#gh-remote-cancel").onclick = close;
@@ -480,11 +502,13 @@ const GithubPanel = (() => {
 
   function isPullRemoteError(output) {
     if (!output) return false;
-    const lower = output.toLowerCase();
+    const lower = String(output).toLowerCase();
     return lower.includes("does not appear to be a git repository") ||
            lower.includes("no tracking information") ||
            lower.includes("please specify which branch") ||
-           lower.includes("git branch --set-upstream-to");
+           lower.includes("git branch --set-upstream-to") ||
+           lower.includes("couldn't find remote ref") ||
+           lower.includes("no such ref was fetched");
   }
 
   async function repoAction(id, act, message) {
@@ -515,9 +539,9 @@ const GithubPanel = (() => {
         out2.classList.toggle("err", isErr);
         out2.classList.remove("hidden");
       }
-      if (!res.ok && act === "pull" && isPullRemoteError(res.output)) {
+      if (!res.ok && act === "pull" && (res.needForceSync || isPullRemoteError(res.output))) {
         const repo = lastRegistered.find((r) => r.id === id);
-        showRemoteDialog(id, repo, res.output);
+        showRemoteDialog(id, repo, res.output, res.defaultBranch);
       }
     } catch (e) {
       if (out) {

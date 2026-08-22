@@ -1127,6 +1127,14 @@ async function repoGitStatus(relDir) {
   return { branch, ahead, behind, dirty, files };
 }
 
+// リモート（origin）の既定ブランチ名を取得する。取得できない場合は空文字。
+async function remoteDefaultBranch(relDir) {
+  const r = await runGit(relDir, ["ls-remote", "--symref", "origin", "HEAD"], 30000);
+  if (r.code !== 0) return "";
+  const m = (r.stdout || "").match(/^ref:\s+refs\/heads\/([^\s]+)/m);
+  return m ? m[1] : "";
+}
+
 // git status -sb の変更ファイル行（" M foo.txt" / "M  foo.txt" / "?? new.txt" / "R  old -> new" など）から
 // 状態コードとパスを取り出す
 function parseStatusFileLine(line) {
@@ -1509,18 +1517,55 @@ app.post("/api/github/repos/:id/action", async (req, res, next) => {
     }
     if (action === "pull") {
       let r = await runGit(repo.path, ["pull"], 120000);
+      let errText = "";
       if (r.code !== 0) {
-        const errText = (r.stdout + r.stderr).trim();
+        errText = (r.stdout + r.stderr).trim();
         // upstream 未設定の場合は origin/ブランチ を明示して再試行
         if (/does not appear to be a git repository|no tracking information|please specify which branch|git branch --set-upstream-to/i.test(errText)) {
           const br = await runGit(repo.path, ["branch", "--show-current"], 5000);
           const curBranch = (br.stdout || "").trim() || "main";
           r = await runGit(repo.path, ["pull", "origin", curBranch], 120000);
-          // upstream も設定しておく
-          await runGit(repo.path, ["branch", "--set-upstream-to=origin/" + curBranch], 5000).catch(() => {});
+          if (r.code === 0) {
+            await runGit(repo.path, ["branch", "--set-upstream-to=origin/" + curBranch], 5000).catch(() => {});
+          }
+        }
+        // 現在のブランチがリモートに存在しない場合（ローカル master / リモート main など）は
+        // リモートの既定ブランチへ切り替えて pull し直す（未コミット＝コミットが無い場合に限る）
+        const retryErr = errText + "\n" + ((r.stdout || "") + (r.stderr || ""));
+        if (r.code !== 0 && /couldn'?t find remote ref|no such ref was fetched/i.test(retryErr)) {
+          const defBr = await remoteDefaultBranch(repo.path);
+          if (defBr) {
+            const br2 = await runGit(repo.path, ["branch", "--show-current"], 5000);
+            const curBranch2 = (br2.stdout || "").trim();
+            const headChk = await runGit(repo.path, ["rev-parse", "--verify", "HEAD"], 5000);
+            const unborn = headChk.code !== 0;
+            const heads = curBranch2 ? await runGit(repo.path, ["ls-remote", "--heads", "origin", curBranch2], 30000) : { stdout: "" };
+            const remoteHasCur = !!(heads.stdout || "").trim();
+            const canSwitch = unborn && (!curBranch2 || !remoteHasCur) && defBr !== curBranch2;
+            if (canSwitch) {
+              const sw = await runGit(repo.path, ["checkout", "-B", defBr, "origin/" + defBr], 60000);
+              if (sw.code === 0) {
+                r = await runGit(repo.path, ["pull"], 120000);
+              } else {
+                // 未追跡ファイルの衝突などで切替できない場合は、修復ダイアログ用の情報を返す
+                await runGit(repo.path, ["fetch", "origin"], 180000);
+                return res.json({
+                  ok: false, action, code: sw.code,
+                  output: ((sw.stdout || "") + (sw.stderr || "")).trim() ||
+                    "ブランチ " + curBranch2 + " はリモートに存在しません。既定ブランチ " + defBr + " への同期が必要です。",
+                  defaultBranch: defBr,
+                  needForceSync: true,
+                });
+              }
+            }
+          }
         }
       }
       const output = (r.stdout + r.stderr).trim();
+      // 失敗時はリモートの既定ブランチを検出して添える（GUI の修復ダイアログの初期値に使う）
+      if (r.code !== 0 && /couldn'?t find remote ref|no such ref was fetched/i.test(output)) {
+        return res.json({ ok: false, action, code: r.code, output, defaultBranch: (await remoteDefaultBranch(repo.path)) || undefined });
+      }
       return res.json({ ok: r.code === 0, action, code: r.code, output });
     }
     const r = await runGit(repo.path, [action], 60000);
@@ -1560,8 +1605,20 @@ app.post("/api/github/repos/:id/remote", async (req, res, next) => {
     let syncOutput = "";
     let syncFailed = false;
     for (const st of steps) {
-      const r = await runGit(repo.path, st.args, st.timeout);
-      const o = ((r.stdout || "") + (r.stderr || "")).trim();
+      let r = await runGit(repo.path, st.args, st.timeout);
+      let o = ((r.stdout || "") + (r.stderr || "")).trim();
+      // checkout -B は未追跡ファイルがリモート内容と競合すると失敗する。
+      // リモートで上書き（#3）に同意済みなら、リセットしてから切替を再試行する。
+      if (r.code !== 0 && st.args[0] === "checkout" && st.args[1] === "-B" && fsOpt.reset) {
+        const rr = await runGit(repo.path, ["reset", "--hard", "origin/" + branch], st.timeout);
+        o += "\n  # 競合のため git reset --hard origin/" + branch + " を実行: " + (((rr.stdout || "") + (rr.stderr || "")).trim() || "(完了)");
+        if (rr.code === 0) {
+          r = await runGit(repo.path, st.args, st.timeout);
+          o += "\n  # 切替を再試行: " + (((r.stdout || "") + (r.stderr || "")).trim() || "(完了)");
+        } else {
+          r = rr;
+        }
+      }
       syncOutput += st.n + " $ git " + st.args.join(" ") + "\n" + (o || "(完了)") + "\n\n";
       if (r.code !== 0) { syncFailed = true; break; }
     }
