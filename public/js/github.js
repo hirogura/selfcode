@@ -511,6 +511,34 @@ const GithubPanel = (() => {
            lower.includes("no such ref was fetched");
   }
 
+  // カードを作り直さず、既存カードの状態表示（branch / ahead / behind など）だけを更新する
+  function updateRepoCard(r) {
+    if (!r) return false;
+    const el = $("gh-repos").querySelector('.gh-repo[data-id="' + String(r.id) + '"]');
+    if (!el) return false;
+    const branchBtn = el.querySelector(".gh-branch-btn");
+    if (branchBtn) branchBtn.textContent = "branch: " + (r.branch || "—") + " ▾";
+    const bits = [];
+    if (r.ahead) bits.push("ahead " + r.ahead);
+    if (r.behind) bits.push("behind " + r.behind);
+    if (r.dirty) bits.push("変更 " + r.dirty + " ファイル");
+    if (r.error) bits.push("エラー: " + r.error);
+    const meta = bits.join(" ・ ");
+    let metaEl = el.querySelector(".gh-repo-meta");
+    if (meta) {
+      if (!metaEl) {
+        metaEl = document.createElement("div");
+        metaEl.className = "gh-repo-meta";
+        const anchor = el.querySelector(".gh-repo-meta-row") || el.querySelector(".gh-repo-actions");
+        if (anchor) anchor.after(metaEl); else el.appendChild(metaEl);
+      }
+      metaEl.textContent = meta;
+    } else if (metaEl) {
+      metaEl.remove();
+    }
+    return true;
+  }
+
   async function repoAction(id, act, message) {
     if (act === "open") {
       const repo = lastRegistered.find((r) => r.id === id);
@@ -531,8 +559,14 @@ const GithubPanel = (() => {
       const res = await API.github.action(id, act, message);
       const outputText = res.output || (res.ok ? "完了しました" : "失敗しました");
       const isErr = !res.ok;
-      await renderRepos();
-      const item2 = $("gh-repos").querySelector(`.gh-repo[data-id="${CSS.escape(id)}"]`);
+      // 全カードの再構築は行わず、該当カードの状態表示だけを更新する
+      let list = lastRegistered;
+      try {
+        list = await API.github.registered();
+        lastRegistered = list;
+      } catch {}
+      if (!updateRepoCard(list.find((r) => String(r.id) === String(id)))) await renderRepos();
+      const item2 = $("gh-repos").querySelector(`.gh-repo[data-id="${CSS.escape(id)}"]`) || item;
       const out2 = item2 && item2.querySelector(".gh-repo-output");
       if (out2) {
         out2.textContent = outputText;
@@ -549,6 +583,11 @@ const GithubPanel = (() => {
         out.classList.add("err");
       }
       toast(e.message, true);
+    } finally {
+      const itemF = $("gh-repos").querySelector(`.gh-repo[data-id="${CSS.escape(id)}"]`);
+      const btns2 = itemF && itemF.querySelectorAll(".gh-repo-actions .btn");
+      if (btns2) for (const b of btns2) b.disabled = false;
+      if (message !== undefined) itemF?.querySelector(".gh-commit-msg")?.removeAttribute("disabled");
     }
   }
 
