@@ -287,6 +287,7 @@ const GithubPanel = (() => {
       '<button class="btn small" data-act="fetch">取得</button>' +
       '<button class="btn small primary" data-act="pull">pull</button>' +
       '<button class="btn small" data-act="status">状態</button>' +
+      '<button class="btn small" data-act="gitignore" title=".gitignore が無い場合のみ作成する">gitignore</button>' +
       '<button class="btn small" data-act="commit">コミット</button>' +
       '<button class="btn small" data-act="cancel" title="最新コミットと未コミット変更をすべて破棄して直前のコミット状態に戻す">キャンセル</button>' +
       '<button class="btn small" data-act="push">push</button>' +
@@ -359,6 +360,10 @@ const GithubPanel = (() => {
     }
     if (btn.dataset.act === "commit") {
       btn.closest(".gh-repo").querySelector(".gh-commit-row").classList.toggle("hidden");
+      return;
+    }
+    if (btn.dataset.act === "gitignore") {
+      doCreateGitignore(id, btn);
       return;
     }
     repoAction(id, btn.dataset.act);
@@ -528,6 +533,23 @@ const GithubPanel = (() => {
       toast(e2.message, true);
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = "ブランチ自動整理"; }
+    }
+  }
+
+  // .gitignore ボタン: リポジトリ内に無い場合のみ .gitignore を作成する
+  async function doCreateGitignore(id, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = "作成中…"; }
+    try {
+      const res = await API.github.createGitignore(id);
+      if (res.ok && res.created) {
+        toast(".gitignore を作成しました: " + (res.path || ""));
+      } else {
+        toast("既に .gitignore が存在するため作成しませんでした", true);
+      }
+    } catch (e) {
+      toast(e.message, true);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = "gitignore"; }
     }
   }
 

@@ -1659,6 +1659,68 @@ app.post("/api/github/repos/:id/action", async (req, res, next) => {
   }
 });
 
+// 登録済みリポジトリのルートに .gitignore を作成する（既に存在する場合は何もしない）
+const GITIGNORE_TEMPLATE = [
+  ".env",
+  ".env.*",
+  "!.env.example",
+  "",
+  "credentials.*",
+  "secrets.*",
+  ".git-credentials",
+  "",
+  "*.db",
+  "*.sqlite",
+  "*.sqlite3",
+  "*.sql",
+  "*.dump",
+  "*.backup",
+  "*.bak",
+  "",
+  ".DS_Store",
+  "Thumbs.db",
+  "",
+  "*.log",
+  "logs/",
+  "backup/",
+  "backups/",
+  "data/",
+  "uploads/",
+  "",
+  "*.pem",
+  "*.key",
+  "*.p12",
+  "*.pfx",
+  "",
+].join("\n");
+
+app.post("/api/github/repos/:id/gitignore", async (req, res, next) => {
+  try {
+    const id = String(req.params.id || "");
+    const repo = githubCfg.repos.find((r) => r.id === id);
+    if (!repo) return res.status(404).json({ error: "リポジトリが見つかりません" });
+    const target = (repo.path || "").replace(/\/+$/, "") + "/.gitignore";
+    // 既に存在する場合は作成しない
+    let exists = false;
+    if (containerCtx) {
+      try { await runContainer(["test", "-e", target]); exists = true; } catch {}
+    } else {
+      try { await fsp.access(resolveRel(target)); exists = true; } catch {}
+    }
+    if (exists) return res.json({ ok: false, existed: true, path: target });
+    if (containerCtx) {
+      await runContainer(["tee", target], { input: Buffer.from(GITIGNORE_TEMPLATE, "utf8") });
+    } else {
+      const abs = resolveRel(target);
+      await fsp.mkdir(path.dirname(abs), { recursive: true });
+      await fsp.writeFile(abs, GITIGNORE_TEMPLATE);
+    }
+    res.json({ ok: true, created: true, path: target });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // リモートURLの追加/更新とトラッキングブランチの設定
 app.post("/api/github/repos/:id/remote", async (req, res, next) => {
   try {
