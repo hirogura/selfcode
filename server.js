@@ -1272,6 +1272,89 @@ app.put("/api/github/git-config", async (req, res, next) => {
   }
 });
 
+// 入力中の user.name / user.email を全ユーザーの ~/.gitconfig に適用する。
+// 対象は root と実ユーザー（uid 1000..65533、ログインシェル持ち）。他ユーザー分は
+// git config --file で各ホームの .gitconfig に直接書き込み、所有者をそのユーザーに戻す。
+function listGitTargetUsers() {
+  const users = [];
+  try {
+    const passwd = fs.readFileSync("/etc/passwd", "utf8");
+    for (const line of passwd.split("\n")) {
+      const parts = line.split(":");
+      if (parts.length < 7) continue;
+      const name = parts[0];
+      const uid = Number(parts[2]);
+      const gid = Number(parts[3]);
+      const home = parts[5];
+      const shell = parts[6];
+      if (!name || !home) continue;
+      if (!Number.isFinite(uid) || !Number.isFinite(gid)) continue;
+      const isRoot = uid === 0 && name === "root";
+      const isRealUser = uid >= 1000 && uid < 65534;
+      if (!isRoot && !isRealUser) continue;
+      if (shell && (shell.includes("nologin") || shell === "/bin/false" || shell === "/usr/sbin/nologin")) continue;
+      users.push({ name, uid, gid, home });
+    }
+  } catch {}
+  return users;
+}
+
+async function runGitConfigArgs(args) {
+  return new Promise((resolve) => {
+    const child = spawn("git", args, {
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let err = "";
+    child.stderr.on("data", (d) => (err += d));
+    child.on("error", (e) => resolve({ code: -1, err: e.message }));
+    child.on("close", (code) => resolve({ code, err }));
+  });
+}
+
+async function applyGitConfigToUser(u, name, email) {
+  try {
+    if (!fs.existsSync(u.home)) return { user: u.name, ok: false, error: "ホームディレクトリがありません" };
+    const myUid = typeof process.getuid === "function" ? process.getuid() : -1;
+    const isSelf = u.uid === myUid;
+    if (!isSelf && !IS_ROOT) return { user: u.name, ok: false, error: "root 権限が必要です" };
+    const file = path.join(u.home, ".gitconfig");
+    for (const [key, value] of [["user.name", name], ["user.email", email]]) {
+      if (isSelf) {
+        // 自分自身にはこれまで通り git config --global を使う
+        await runGitConfigSet(key, value);
+        continue;
+      }
+      const args = value ? ["config", "--file", file, key, value] : ["config", "--file", file, "--unset", key];
+      const { code, err } = await runGitConfigArgs(args);
+      // --unset はキーが存在しなくても失敗扱いにしない
+      if (code !== 0 && value) {
+        return { user: u.name, ok: false, error: (err || "").trim() || `git config ${key} 失敗` };
+      }
+    }
+    if (!isSelf) {
+      try { fs.chownSync(file, u.uid, u.gid); } catch {}
+    }
+    return { user: u.name, ok: true };
+  } catch (e) {
+    return { user: u.name, ok: false, error: e.message };
+  }
+}
+
+app.post("/api/github/git-config/apply-all", async (req, res, next) => {
+  try {
+    const name = String(req.body.name ?? "").trim();
+    const email = String(req.body.email ?? "").trim();
+    // 非 root で動いている場合は自分以外の適用が失敗するので、その結果をそのまま返す
+    const targets = listGitTargetUsers();
+    const results = [];
+    for (const u of targets) results.push(await applyGitConfigToUser(u, name, email));
+    res.json({ ok: results.every((r) => r.ok), results });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // トークンの接続確認（GitHub ユーザー情報を取得）
 app.get("/api/github/user", async (req, res, next) => {
   try {

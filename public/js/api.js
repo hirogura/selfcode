@@ -111,6 +111,7 @@ const API = (() => {
       remove: (id) => API.del("/api/github/repos/" + encodeURIComponent(id)),
       gitConfig: () => API.get("/api/github/git-config"),
       saveGitConfig: (name, email) => API.put("/api/github/git-config", { name, email }),
+      applyGitConfigAll: (name, email) => API.post("/api/github/git-config/apply-all", { name, email }),
     },
 
     oc: {

@@ -109,6 +109,37 @@ const GithubPanel = (() => {
     }
   }
 
+  async function applyAllGitConfig() {
+    const name = $("gh-git-name").value.trim();
+    const email = $("gh-git-email").value.trim();
+    if (!name && !email) return toast("ユーザー名またはメールアドレスを入力してください", true);
+    if (!confirm("このマシンの全ユーザー（root・実ユーザー）の ~/.gitconfig に\nuser.name / user.email を書き込みますか？")) return;
+    const btn = $("gh-git-apply-all");
+    btn.classList.add("busy");
+    btn.disabled = true;
+    const st = $("gh-git-status");
+    try {
+      const res = await API.github.applyGitConfigAll(name, email);
+      const rs = res.results || [];
+      const okUsers = rs.filter((r) => r.ok).map((r) => r.user);
+      const ng = rs.filter((r) => !r.ok);
+      st.textContent =
+        "全ユーザーに適用: " + (okUsers.length ? okUsers.join(", ") : "なし") +
+        (ng.length ? " ／ 失敗: " + ng.map((r) => r.user + "（" + r.error + "）").join(", ") : "");
+      st.classList.toggle("ok", okUsers.length > 0);
+      st.classList.toggle("err", ng.length > 0);
+      toast(ng.length ? "一部のユーザーに適用に失敗しました" : "全ユーザーに適用しました", !!ng.length);
+    } catch (e) {
+      st.textContent = "適用に失敗: " + e.message;
+      st.classList.add("err");
+      st.classList.remove("ok");
+      toast(e.message, true);
+    } finally {
+      btn.classList.remove("busy");
+      btn.disabled = false;
+    }
+  }
+
   function setSettingsStatus(msg, ok) {
     const st = $("gh-settings-status");
     st.textContent = msg;
@@ -707,6 +738,7 @@ const GithubPanel = (() => {
     $("gh-clear").onclick = clearSettings;
     $("gh-token-toggle").onclick = toggleTokenVisible;
     $("gh-git-save").onclick = saveGitConfig;
+    $("gh-git-apply-all").onclick = applyAllGitConfig;
     $("gh-add-toggle").onclick = () => $("gh-add").classList.toggle("hidden");
     $("gh-clone").onclick = cloneRepo;
     $("gh-own-toggle").onclick = toggleOwnRepos;
