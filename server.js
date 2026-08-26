@@ -1495,7 +1495,7 @@ app.post("/api/github/repos/:id/action", async (req, res, next) => {
     const action = String(req.body.action || "");
     const repo = githubCfg.repos.find((r) => r.id === id);
     if (!repo) return res.status(404).json({ error: "リポジトリが見つかりません" });
-    if (!["status", "fetch", "pull", "log", "commit", "cancel", "push", "branch", "cleanup"].includes(action)) {
+    if (!["status", "fetch", "pull", "log", "commit", "cancel", "push", "branch", "cleanup", "force-pull"].includes(action)) {
       return res.status(400).json({ error: "不明な操作です" });
     }
     if (action === "status") {
@@ -1650,6 +1650,46 @@ app.post("/api/github/repos/:id/action", async (req, res, next) => {
         return res.json({ ok: false, action, code: r.code, output, defaultBranch: (await remoteDefaultBranch(repo.path)) || undefined });
       }
       return res.json({ ok: r.code === 0, action, code: r.code, output });
+    }
+    if (action === "force-pull") {
+      // ローカルの変更（未コミット・未push・未追跡ファイル）をすべて破棄し、リモートの最新状態に合わせる
+      const parts = [];
+      const f = await runGit(repo.path, ["fetch", "origin", "--prune"], 180000);
+      parts.push(((f.stdout || "") + (f.stderr || "")).trim());
+      if (f.code !== 0) {
+        return res.json({ ok: false, action, output: parts.filter(Boolean).join("\n") });
+      }
+      // 目標ブランチを決める（現在のブランチがリモートに無ければ既定ブランチへ）
+      const br = await runGit(repo.path, ["branch", "--show-current"], 5000);
+      const cur = (br.stdout || "").trim();
+      let target = cur;
+      let needCheckout = false;
+      if (!cur) {
+        target = (await remoteDefaultBranch(repo.path)) || "main";
+        needCheckout = true;
+      } else {
+        const heads = await runGit(repo.path, ["ls-remote", "--heads", "origin", cur], 30000);
+        if (!(heads.stdout || "").trim()) {
+          target = (await remoteDefaultBranch(repo.path)) || "main";
+          needCheckout = true;
+        }
+      }
+      if (needCheckout) {
+        const sw = await runGit(repo.path, ["checkout", "-B", target, "origin/" + target], 60000);
+        parts.push(((sw.stdout || "") + (sw.stderr || "")).trim());
+        if (sw.code !== 0) {
+          return res.json({ ok: false, action, output: parts.filter(Boolean).join("\n") });
+        }
+      } else {
+        const rs = await runGit(repo.path, ["reset", "--hard", "origin/" + target], 60000);
+        parts.push(((rs.stdout || "") + (rs.stderr || "")).trim());
+        if (rs.code !== 0) {
+          return res.json({ ok: false, action, output: parts.filter(Boolean).join("\n") });
+        }
+      }
+      const cl = await runGit(repo.path, ["clean", "-fd"], 30000);
+      parts.push(((cl.stdout || "") + (cl.stderr || "")).trim());
+      return res.json({ ok: cl.code === 0, action, output: parts.filter(Boolean).join("\n") || "完了しました" });
     }
     const r = await runGit(repo.path, [action], 60000);
     const output = (r.stdout + r.stderr).trim();

@@ -286,6 +286,7 @@ const GithubPanel = (() => {
       '<button class="btn small" data-act="term" title="ターミナルで開き、エクスプローラもそのフォルダへ移動">Term</button>' +
       '<button class="btn small" data-act="fetch">取得</button>' +
       '<button class="btn small primary" data-act="pull">pull</button>' +
+      '<button class="btn small" data-act="force-pull" title="ローカルの変更をすべて破棄し、リモートの最新状態に合わせる">強制pull</button>' +
       '<button class="btn small" data-act="status">状態</button>' +
       '<button class="btn small" data-act="gitignore" title=".gitignore が無い場合のみ作成する">gitignore</button>' +
       '<button class="btn small" data-act="commit">コミット</button>' +
@@ -364,6 +365,18 @@ const GithubPanel = (() => {
     }
     if (btn.dataset.act === "gitignore") {
       doCreateGitignore(id, btn);
+      return;
+    }
+    if (btn.dataset.act === "force-pull") {
+      const ok = confirm(
+        "強制pullを実行しますか？\n\n" +
+        "・未コミットの変更をすべて破棄します\n" +
+        "・未pushのローカルコミットを破棄します\n" +
+        "・未追跡ファイルも削除されます\n\n" +
+        "ローカルの状態はリモートの最新内容に合わせられ、元に戻せません。"
+      );
+      if (!ok) return;
+      repoAction(id, "force-pull");
       return;
     }
     repoAction(id, btn.dataset.act);
