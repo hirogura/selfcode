@@ -1214,7 +1214,16 @@ app.delete("/api/github/settings", async (req, res, next) => {
 });
 
 // git config --global user.name / user.email の取得・保存
+// コンテナ選択中はそのコンテナ内の git config --global を対象にする
+function gitConfigTargetLabel() {
+  return containerCtx ? `コンテナ「${containerCtx.name}」` : "ホスト";
+}
+
 async function runGitConfigGet(key) {
+  if (containerCtx) {
+    const r = await runGitInContainer(["config", "--global", key], 10000);
+    return r.code === 0 ? (r.stdout || "").trim() : "";
+  }
   const { code, stdout } = await new Promise((resolve) => {
     const child = spawn("git", ["config", "--global", key], {
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
@@ -1229,6 +1238,11 @@ async function runGitConfigGet(key) {
 }
 
 async function runGitConfigSet(key, value) {
+  if (containerCtx) {
+    const args = value ? ["config", "--global", key, value] : ["config", "--global", "--unset", key];
+    await runGitInContainer(args, 10000);
+    return;
+  }
   if (!value) {
     await new Promise((resolve) => {
       const child = spawn("git", ["config", "--global", "--unset", key], {
@@ -1254,7 +1268,7 @@ app.get("/api/github/git-config", async (req, res, next) => {
   try {
     const name = await runGitConfigGet("user.name");
     const email = await runGitConfigGet("user.email");
-    res.json({ name, email });
+    res.json({ name, email, target: gitConfigTargetLabel() });
   } catch (e) {
     next(e);
   }
@@ -1266,7 +1280,20 @@ app.put("/api/github/git-config", async (req, res, next) => {
     const email = String(req.body.email ?? "").trim();
     await runGitConfigSet("user.name", name);
     await runGitConfigSet("user.email", email);
-    res.json({ ok: true, name, email });
+    res.json({ ok: true, name, email, target: gitConfigTargetLabel() });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// 現在の場所（ホストまたは選択中のコンテナ）の git config --global --list を表示
+app.get("/api/github/git-config/list", async (req, res, next) => {
+  try {
+    const r = containerCtx
+      ? await runGitInContainer(["config", "--global", "--list"], 10000)
+      : await runGitSpawn(ROOT, ["config", "--global", "--list"], 10000);
+    const output = ((r.stdout || "") + (r.stderr || "")).trim();
+    res.json({ ok: r.code === 0, target: gitConfigTargetLabel(), output });
   } catch (e) {
     next(e);
   }

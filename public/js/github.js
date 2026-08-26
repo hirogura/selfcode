@@ -93,7 +93,7 @@ const GithubPanel = (() => {
     try {
       const res = await API.github.saveGitConfig(name, email);
       const st = $("gh-git-status");
-      st.textContent = "保存しました（git config --global）";
+      st.textContent = "保存しました（" + (res.target || "git config --global") + "）";
       st.classList.add("ok");
       st.classList.remove("err");
       toast("コミット設定を保存しました");
@@ -132,6 +132,29 @@ const GithubPanel = (() => {
     } catch (e) {
       st.textContent = "適用に失敗: " + e.message;
       st.classList.add("err");
+      st.classList.remove("ok");
+      toast(e.message, true);
+    } finally {
+      btn.classList.remove("busy");
+      btn.disabled = false;
+    }
+  }
+
+  async function checkGitConfig() {
+    const btn = $("gh-git-check");
+    btn.classList.add("busy");
+    btn.disabled = true;
+    const st = $("gh-git-status");
+    try {
+      const res = await API.github.gitConfigList();
+      const body = (res.output || "").trim();
+      st.textContent = "【" + (res.target || "ホスト") + "】\n" + (body || "（git config --global の設定はありません）");
+      st.classList.add("pre");
+      st.classList.toggle("ok", !!res.ok);
+      st.classList.remove("err");
+    } catch (e) {
+      st.textContent = "確認に失敗: " + e.message;
+      st.classList.add("err", "pre");
       st.classList.remove("ok");
       toast(e.message, true);
     } finally {
@@ -773,6 +796,7 @@ const GithubPanel = (() => {
     $("gh-clear").onclick = clearSettings;
     $("gh-token-toggle").onclick = toggleTokenVisible;
     $("gh-git-save").onclick = saveGitConfig;
+    $("gh-git-check").onclick = checkGitConfig;
     $("gh-git-apply-all").onclick = applyAllGitConfig;
     $("gh-add-toggle").onclick = () => $("gh-add").classList.toggle("hidden");
     $("gh-clone").onclick = cloneRepo;

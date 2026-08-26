@@ -708,6 +708,11 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
 }
 .gh-status.ok { color: var(--green); }
 .gh-status.err { color: var(--red); }
+.gh-status.pre {
+  white-space: pre-wrap;
+  max-height: 180px;
+  overflow-y: auto;
+}
 .gh-add { border-top: 1px solid var(--border); padding-bottom: 8px; }
 .gh-add-actions { display: flex; gap: 6px; padding: 8px 10px 0; }
 .gh-own {
