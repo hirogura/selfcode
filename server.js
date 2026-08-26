@@ -1854,6 +1854,37 @@ app.post("/api/github/repos/:id/remote", async (req, res, next) => {
   }
 });
 
+// 初回push（リモート未設定のリポジトリに origin を追加して push -u する）
+app.post("/api/github/repos/:id/first-push", async (req, res, next) => {
+  try {
+    const id = String(req.params.id || "");
+    const repo = githubCfg.repos.find((r) => r.id === id);
+    if (!repo) return res.status(404).json({ error: "リポジトリが見つかりません" });
+    const url = String(req.body.url || "").trim();
+    const branch = String(req.body.branch || "").trim() || "main";
+    if (!url) return res.status(400).json({ error: "リモートURLを入力してください" });
+    const parts = [];
+    // origin が既にあれば URL を更新、なければ追加
+    const existR = await runGit(repo.path, ["remote", "get-url", "origin"], 10000);
+    const remArgs = existR.code === 0 ? ["remote", "set-url", "origin", url] : ["remote", "add", "origin", url];
+    const remR = await runGit(repo.path, remArgs, 10000);
+    parts.push("$ git remote " + (existR.code === 0 ? "set-url" : "add") + " origin " + url + "\n" +
+      (((remR.stdout || "") + (remR.stderr || "")).trim() || "(完了)"));
+    if (remR.code !== 0) {
+      return res.json({ ok: false, output: parts.join("\n\n") });
+    }
+    const pushR = await runGit(repo.path, ["push", "-u", "origin", branch], 180000);
+    parts.push("$ git push -u origin " + branch + "\n" + ((pushR.stdout || "") + (pushR.stderr || "")).trim());
+    if (pushR.code === 0) {
+      repo.url = url;
+      await saveGithubConfig();
+    }
+    res.json({ ok: pushR.code === 0, output: parts.filter(Boolean).join("\n\n") });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // 登録を解除（ファイルは削除しない）
 app.delete("/api/github/repos/:id", async (req, res, next) => {
   try {

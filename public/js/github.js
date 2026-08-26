@@ -315,6 +315,7 @@ const GithubPanel = (() => {
       '<button class="btn small" data-act="commit">コミット</button>' +
       '<button class="btn small" data-act="cancel" title="最新コミットと未コミット変更をすべて破棄して直前のコミット状態に戻す">キャンセル</button>' +
       '<button class="btn small" data-act="push">push</button>' +
+      '<button class="btn small" data-act="first-push" title="リモート未設定のリポジトリに origin を追加して初回push（git push -u）を行う">初push</button>' +
       '<button class="btn small" data-act="log">ログ</button>' +
       '<button class="btn small" data-act="open">開く</button>' +
       "</div>" +
@@ -388,6 +389,11 @@ const GithubPanel = (() => {
     }
     if (btn.dataset.act === "gitignore") {
       doCreateGitignore(id, btn);
+      return;
+    }
+    if (btn.dataset.act === "first-push") {
+      const repo = lastRegistered.find((r) => String(r.id) === String(id));
+      showFirstPushDialog(id, repo);
       return;
     }
     if (btn.dataset.act === "force-pull") {
@@ -483,6 +489,73 @@ const GithubPanel = (() => {
         toast(e2.message, true);
       }
     };
+  }
+
+  function showFirstPushDialog(id, repo) {
+    const overlay = document.createElement("div");
+    overlay.className = "modal";
+    overlay.innerHTML =
+      '<div class="modal-box" style="min-width:400px">' +
+        '<div class="modal-head"><span>初回push</span></div>' +
+        '<div style="padding:12px;font-size:13px;line-height:1.6">' +
+          '<div style="margin-bottom:8px;color:var(--fg-dim)">リモートリポジトリのURLとブランチを指定して初回pushします。<br>git remote add origin &lt;URL&gt; → git push -u origin &lt;ブランチ&gt;</div>' +
+          '<label style="display:block;margin-bottom:4px;font-size:11px;color:var(--fg-dim)">リモートURL</label>' +
+          '<input id="gh-firstpush-url" type="text" style="width:100%;box-sizing:border-box;padding:5px 8px;font-size:13px;background:#000;color:#fff;border:1px solid var(--border)" placeholder="https://github.com/user/repo.git" autocomplete="off">' +
+          '<label style="display:block;margin-top:8px;margin-bottom:4px;font-size:11px;color:var(--fg-dim)">ブランチ名</label>' +
+          '<input id="gh-firstpush-branch" type="text" style="width:100%;box-sizing:border-box;padding:5px 8px;font-size:13px;background:#000;color:#fff;border:1px solid var(--border)" placeholder="main" autocomplete="off">' +
+        '</div>' +
+        '<div style="display:flex;justify-content:flex-end;gap:6px;padding:8px 12px;border-top:1px solid var(--border)">' +
+          '<button id="gh-firstpush-cancel" class="btn small">キャンセル</button>' +
+          '<button id="gh-firstpush-ok" class="btn small primary">実行</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    const urlInput = $("gh-firstpush-url");
+    const branchInput = $("gh-firstpush-branch");
+    urlInput.value = (repo && repo.url) || "";
+    const curRepo = lastRegistered.find((r) => String(r.id) === String(id));
+    branchInput.value = (curRepo && curRepo.branch) || "main";
+    urlInput.focus();
+    if (!urlInput.value) urlInput.setSelectionRange(0, 0);
+    function close() { overlay.remove(); }
+    overlay.querySelector("#gh-firstpush-cancel").onclick = close;
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+    async function run() {
+      const url = urlInput.value.trim();
+      const branch = branchInput.value.trim() || "main";
+      if (!url) { toast("リモートURLを入力してください", true); return; }
+      const okBtn = $("gh-firstpush-ok");
+      okBtn.disabled = true;
+      okBtn.textContent = "実行中…";
+      try {
+        const res = await API.github.firstPush(id, url, branch);
+        close();
+        // 結果を該当カードの出力欄に表示し、状態表示も更新する
+        let list = lastRegistered;
+        try {
+          list = await API.github.registered();
+          lastRegistered = list;
+        } catch {}
+        if (!updateRepoCard(list.find((r) => String(r.id) === String(id)))) await renderRepos();
+        const item2 = $("gh-repos").querySelector(`.gh-repo[data-id="${CSS.escape(id)}"]`);
+        const out2 = item2 && item2.querySelector(".gh-repo-output");
+        const outputText = res.output || (res.ok ? "完了しました" : "失敗しました");
+        if (out2) {
+          out2.textContent = outputText;
+          out2.classList.toggle("err", !res.ok);
+          out2.classList.remove("hidden");
+        }
+        toast(res.ok ? "初回pushしました（origin/" + branch + "）" : "初回pushに失敗しました", !res.ok);
+      } catch (e2) {
+        toast(e2.message, true);
+        const okBtn2 = $("gh-firstpush-ok");
+        if (okBtn2) { okBtn2.disabled = false; okBtn2.textContent = "実行"; }
+      }
+    }
+    overlay.querySelector("#gh-firstpush-ok").onclick = run;
+    [urlInput, branchInput].forEach((inp) =>
+      inp.addEventListener("keydown", (e) => { if (e.key === "Enter") run(); })
+    );
   }
 
   function showBranchDropdown(id, anchor) {

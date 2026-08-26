@@ -1,6 +1,6 @@
 {
   "name": "selfcode",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "Self-hosted browser code editor with opencode integration",
   "type": "module",
