@@ -1006,11 +1006,21 @@ function gitAuthArgs(url) {
 // git が拒否しないよう safe.directory を付与する（dubious ownership 対策）。
 const GIT_SAFE_DIR = ["-c", "safe.directory=*"];
 
+// git バイナリを解決する。PATH に無い環境（systemd の縮小 PATH 等）でも一般的な場所を探す。
+function gitBin() {
+  const found = findBin("git");
+  if (found) return found;
+  for (const c of ["/usr/bin/git", "/usr/local/bin/git", "/snap/bin/git", "/opt/homebrew/bin/git"]) {
+    try { fs.accessSync(c, fs.constants.X_OK); return c; } catch {}
+  }
+  return "git";
+}
+
 function runGitSpawn(cwd, args, timeoutMs) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn("git", [...GIT_SAFE_DIR, ...args], {
+      child = spawn(gitBin(), [...GIT_SAFE_DIR, ...args], {
         cwd,
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "true" },
         stdio: ["ignore", "pipe", "pipe"],
@@ -1028,7 +1038,11 @@ function runGitSpawn(cwd, args, timeoutMs) {
     }, timeoutMs || 60000);
     child.on("error", (e) => {
       clearTimeout(to);
-      resolve({ code: -1, stdout: out, stderr: err + String(e.message) });
+      let msg = String(e.message);
+      if (e.code === "ENOENT") {
+        msg = "git コマンドが見つかりません。サーバー側で git をインストールするか、PATH を確認してください";
+      }
+      resolve({ code: -1, stdout: out, stderr: err + msg });
     });
     child.on("close", (code) => {
       clearTimeout(to);
