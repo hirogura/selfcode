@@ -910,6 +910,7 @@ const App = (() => {
       const i = parent.children.indexOf(node);
       if (i < 0) return;
       parent.children[i] = wrap;
+      wrap.parent = parent;
     } else {
       termState.root = wrap;
     }
@@ -968,7 +969,7 @@ const App = (() => {
   function updateCloseButtons() {
     const single = termState.panes.size <= 1;
     for (const p of termState.panes.values()) {
-      const btn = p.el && p.el.querySelector(".term-pane-actions .close-pane");
+      const btn = p.el && p.el.querySelector(".term-pane-actions .reset-pane");
       if (btn) btn.disabled = single;
     }
   }
