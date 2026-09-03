@@ -254,6 +254,19 @@ const GithubPanel = (() => {
     try { collapsedRepos = JSON.parse(localStorage.getItem(REPOS_COLLAPSED_KEY) || "{}"); } catch { collapsedRepos = {}; }
   }
 
+  function collapseAllRepos() {
+    const box = $("gh-repos");
+    box.querySelectorAll(".gh-repo").forEach((el) => {
+      const id = el.dataset.id;
+      el.classList.add("collapsed");
+      const tog = el.querySelector(".gh-repo-toggle");
+      if (tog) { tog.textContent = "▸"; tog.title = "ひらく"; }
+      if (id) collapsedRepos[id] = true;
+    });
+    saveCollapsedRepos();
+    toast("すべて折りたたみました");
+  }
+
   function applyCollapsedState(box) {
     box.querySelectorAll(".gh-repo").forEach((el) => {
       const id = el.dataset.id;
@@ -875,6 +888,7 @@ const GithubPanel = (() => {
     $("gh-clone").onclick = cloneRepo;
     $("gh-own-toggle").onclick = toggleOwnRepos;
     $("gh-register-existing").onclick = registerExisting;
+    $("gh-repos-collapse").onclick = collapseAllRepos;
     $("gh-repos-refresh").onclick = renderRepos;
     $("gh-repos").addEventListener("click", onReposClick);
     $("gh-settings-toggle").onclick = () => {
