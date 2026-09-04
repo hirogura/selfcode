@@ -551,6 +551,15 @@ const App = (() => {
     populate("", els.tree, 0);
   }
 
+  // 展開中のフォルダをすべて折りたたむ（ルート＝ワークスペース自体は常に展開表示のまま）
+  function collapseAll() {
+    expandedDirs.clear();
+    saveTreeState();
+    for (const n of els.tree.querySelectorAll(".tree-node.dir.expanded")) {
+      if (n.dataset.path !== "") n.classList.remove("expanded");
+    }
+  }
+
   function setupMonaco() {
     window.MonacoEnvironment = {
       getWorkerUrl: (moduleId, label) => {
@@ -1920,6 +1929,7 @@ const App = (() => {
 
     els.showHidden.addEventListener("change", refreshTree);
     $("btn-refresh").onclick = refreshTree;
+    $("btn-tree-collapse").onclick = collapseAll;
     $("btn-container").onclick = openContainerPicker;
     $("btn-new-file").onclick = () => createFile(selectedDir);
     $("btn-new-folder").onclick = () => createFolder(selectedDir);
