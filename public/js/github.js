@@ -328,6 +328,7 @@ const GithubPanel = (() => {
       '<button class="btn small" data-act="commit">コミット</button>' +
       '<button class="btn small" data-act="cancel" title="最新コミットと未コミット変更をすべて破棄して直前のコミット状態に戻す">キャンセル</button>' +
       '<button class="btn small" data-act="push">push</button>' +
+      '<button class="btn small" data-act="force-push" title="ローカルの履歴でリモートの main を強制的に上書きpush（git push --force-with-lease origin main）">強制push</button>' +
       '<button class="btn small" data-act="first-push" title="リモート未設定のリポジトリに origin を追加して初回push（git push -u）を行う">初push</button>' +
       '<button class="btn small" data-act="log">ログ</button>' +
       '<button class="btn small" data-act="open">開く</button>' +
@@ -419,6 +420,19 @@ const GithubPanel = (() => {
       );
       if (!ok) return;
       repoAction(id, "force-pull");
+      return;
+    }
+    if (btn.dataset.act === "force-push") {
+      const ok = confirm(
+        "強制pushを実行しますか？\n\n" +
+        "git push --force-with-lease origin main\n\n" +
+        "・登録済みのユーザー名とPATで認証します\n" +
+        "・リモートの main の履歴をローカルの内容で上書きします\n" +
+        "・リモートが想定外に進んでいた場合は拒否されます（--force-with-lease）\n\n" +
+        "リモートの履歴を書き換えるため、元に戻せません。"
+      );
+      if (!ok) return;
+      repoAction(id, "force-push");
       return;
     }
     repoAction(id, btn.dataset.act);

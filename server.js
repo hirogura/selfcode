@@ -998,7 +998,10 @@ async function ghApi(p, opts = {}) {
 // .git/config には保存しない。送信先は github.com のみに限定する（他ホストへトークンを送らない）。
 function gitAuthArgs(url) {
   if (!githubCfg.token || !String(url || "").includes("github.com")) return [];
-  const auth = "basic " + Buffer.from("x-access-token:" + githubCfg.token).toString("base64");
+  // 登録済みユーザー名とPATを使う（GitHub は基本認証のユーザー名を検証しないため、
+  // ユーザー名未登録時は慣例の x-access-token にフォールバックする）
+  const user = githubCfg.username || "x-access-token";
+  const auth = "basic " + Buffer.from(user + ":" + githubCfg.token).toString("base64");
   return ["-c", "credential.helper=", "-c", "core.askPass=true", "-c", "http.extraheader=AUTHORIZATION: " + auth];
 }
 
@@ -1536,7 +1539,7 @@ app.post("/api/github/repos/:id/action", async (req, res, next) => {
     const action = String(req.body.action || "");
     const repo = githubCfg.repos.find((r) => r.id === id);
     if (!repo) return res.status(404).json({ error: "リポジトリが見つかりません" });
-    if (!["status", "fetch", "pull", "log", "commit", "cancel", "push", "branch", "cleanup", "force-pull"].includes(action)) {
+    if (!["status", "fetch", "pull", "log", "commit", "cancel", "push", "force-push", "branch", "cleanup", "force-pull"].includes(action)) {
       return res.status(400).json({ error: "不明な操作です" });
     }
     if (action === "status") {
@@ -1690,6 +1693,13 @@ app.post("/api/github/repos/:id/action", async (req, res, next) => {
       if (r.code !== 0 && /couldn'?t find remote ref|no such ref was fetched/i.test(output)) {
         return res.json({ ok: false, action, code: r.code, output, defaultBranch: (await remoteDefaultBranch(repo.path)) || undefined });
       }
+      return res.json({ ok: r.code === 0, action, code: r.code, output });
+    }
+    if (action === "force-push") {
+      // 登録済みのユーザー名とPATを利用して、リモート履歴をローカルの内容で強制的に上書きpushする
+      // （--force-with-lease のため、リモートが想定外の状態に進んでいた場合は拒否される）
+      const r = await runGit(repo.path, ["push", "--force-with-lease", "origin", "main"], 180000);
+      const output = (r.stdout + r.stderr).trim();
       return res.json({ ok: r.code === 0, action, code: r.code, output });
     }
     if (action === "force-pull") {
