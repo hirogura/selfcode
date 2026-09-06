@@ -1,0 +1,45 @@
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 環境変数・シークレット（個人情報を含む可能性があるもの）
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+secrets/
+credentials*
+*.token
+
+# データベース（個人情報が入る可能性があるもの）
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.sqlite3-journal
+*.mdb
+*.ldb
+
+# ログ
+*.log
+logs/
+
+# バックアップ・一時ファイル
+*.tmp
+*.swp
+*~
+*.bak
+
+# OS 生成物
+.DS_Store
+Thumbs.db
+
+# 旧 git 履歴の残骸（root 所有のため削除が必要）
+.git.old/
