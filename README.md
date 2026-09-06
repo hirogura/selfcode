@@ -28,7 +28,7 @@ sudo bash /tmp/install-selfcode.sh
 ```
 
 - 既定のインストール先は `/opt/lxd-data/selfcode`（第1引数で変更可: `sudo bash install-selfcode.sh /srv/selfcode`）
-- `opencode` / `freebuff` / Antigravity CLI (`agy`) が未導入の場合は、確認のうえ一緒にインストールします（Enter または `y` で進む）
+- `opencode` / `freebuff` / Antigravity CLI (`agy`) が未導入の場合は、ターミナル上のボタンから確認のうえインストールできます（Enter または `y` で進む。スクリプト自体は CLI を導入しません）
 - systemd サービス `selfcode.service` の登録・自動起動も行います
 - **Tailscale を導入済みなら、確認のうえ `tailscale serve` で Tailnet 内のみに公開**します（完了メッセージにアクセス URL を表示）
 - 確認をすべてスキップするには `-y` を付けて実行: `sudo bash install-selfcode.sh -y`

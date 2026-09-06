@@ -370,6 +370,10 @@ const Chat = (() => {
     if (!maker) return;
     body.appendChild(maker.el);
     store.set(part.id, maker);
+    // 作成直後のパーツにも内容を反映する（次回 poll まで空表示になるのを防ぐ）
+    try {
+      maker.update(part);
+    } catch {}
     scrollBottom();
   }
 

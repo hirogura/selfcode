@@ -432,9 +432,9 @@ const GithubPanel = (() => {
     if (btn.dataset.act === "force-push") {
       const ok = confirm(
         "強制pushを実行しますか？\n\n" +
-        "git push --force-with-lease origin main\n\n" +
+        "git push --force-with-lease origin <現在のブランチ>\n\n" +
         "・登録済みのユーザー名とPATで認証します\n" +
-        "・リモートの main の履歴をローカルの内容で上書きします\n" +
+        "・リモートの現在のブランチの履歴をローカルの内容で上書きします\n" +
         "・リモートが想定外に進んでいた場合は拒否されます（--force-with-lease）\n\n" +
         "リモートの履歴を書き換えるため、元に戻せません。"
       );
@@ -795,7 +795,7 @@ const GithubPanel = (() => {
   // カードを作り直さず、既存カードの状態表示（branch / ahead / behind など）だけを更新する
   function updateRepoCard(r) {
     if (!r) return false;
-    const el = $("gh-repos").querySelector('.gh-repo[data-id="' + String(r.id) + '"]');
+    const el = $("gh-repos").querySelector('.gh-repo[data-id="' + CSS.escape(String(r.id)) + '"]');
     if (!el) return false;
     const branchBtn = el.querySelector(".gh-branch-btn");
     if (branchBtn) branchBtn.textContent = "branch: " + (r.branch || "—") + " ▾";

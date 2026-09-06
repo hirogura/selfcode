@@ -263,6 +263,16 @@ function resolveDirRel(rel) {
   return dir;
 }
 
+// ワークスペースのルート自体に対する破壊的操作（削除・移動）を拒否する。
+// path 未指定時に resolveRel("") が ROOT を返し、rm -rf で全削除する事故を防ぐ。
+function assertNotRoot(abs) {
+  if (abs === ROOT) {
+    const err = new Error("workspace root itself cannot be modified");
+    err.status = 400;
+    throw err;
+  }
+}
+
 app.use(async (req, res, next) => {
   if (!SELF_PASS) return next();
   const b = req.headers.authorization || "";
@@ -272,7 +282,11 @@ app.use(async (req, res, next) => {
   let pass = "";
   try {
     const dec = Buffer.from(m[1], "base64").toString();
-    [user, pass] = dec.split(":");
+    // パスワードに ":" が含まれていても正しく扱えるよう最初の ":" で分割する
+    const idx = dec.indexOf(":");
+    if (idx < 0) return res.status(401).end();
+    user = dec.slice(0, idx);
+    pass = dec.slice(idx + 1);
   } catch {
     return res.status(401).end();
   }
@@ -287,7 +301,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "1.2.0",
+    version: "1.3.0",
     workspace: ROOT,
     container: containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null,
     opencode: { ready: oc.ready, version: oc.version },
@@ -442,7 +456,7 @@ async function tailscaleMagicDns() {
     const bin = findBin("tailscale") || "tailscale";
     const out = await runCmd(bin, ["status", "--json"], 8000);
     const j = JSON.parse(out.toString("utf8"));
-    const name = j && j.Self && j.Self.DNSName ? String(j.Self.DNSName).replace(/\\.+$/, "") : "";
+    const name = j && j.Self && j.Self.DNSName ? String(j.Self.DNSName).replace(/\.+$/, "") : "";
     return name || null;
   } catch {
     return null;
@@ -577,6 +591,7 @@ app.get("/api/tree", async (req, res, next) => {
 
 app.get("/api/file", async (req, res, next) => {
   try {
+    if (!String(req.query.path || "")) return res.status(400).json({ error: "path required" });
     if (containerCtx) {
       const p = String(req.query.path || "");
       const { stdout } = await runContainer(["cat", p], { timeoutMs: 60000 });
@@ -666,6 +681,8 @@ app.post("/api/file/rename", async (req, res, next) => {
     }
     const a = resolveRel(from);
     const b = resolveRel(to);
+    assertNotRoot(a);
+    assertNotRoot(b);
     await fsp.mkdir(path.dirname(b), { recursive: true });
     await fsp.rename(a, b);
     res.json({ ok: true });
@@ -691,11 +708,13 @@ app.post("/api/file/mkdir", async (req, res, next) => {
 
 app.delete("/api/file", async (req, res, next) => {
   try {
+    if (!String(req.query.path || "")) return res.status(400).json({ error: "path required" });
     if (containerCtx) {
       await runContainer(["rm", "-rf", String(req.query.path || "")]);
       return res.json({ ok: true });
     }
     const abs = resolveRel(req.query.path);
+    assertNotRoot(abs);
     await fsp.rm(abs, { recursive: true, force: true });
     res.json({ ok: true });
   } catch (e) {
@@ -1116,23 +1135,30 @@ async function repoGitStatus(relDir) {
       const first = line.trim();
       if (first.startsWith("## ")) {
         let rest = first.slice(3);
-        const mUp = rest.match(/^(.+?)\.\.\.(.*)$/);
-        if (mUp) {
-          branch = mUp[1].trim();
-          rest = mUp[2];
-        } else {
-          const mBr = rest.match(/^(\S+)/);
-          branch = mBr ? mBr[1] : rest;
+        // コミットがまだ無いリポジトリ ("## No commits yet on main") はそのままブランチ名にする
+        const mInit = rest.match(/^(?:No commits yet on|Initial commit on)\s+(\S+)/);
+        if (mInit) {
+          branch = mInit[1];
           rest = "";
-        }
-        const mB = rest.match(/\[([^\]]*)\]$/);
-        if (mB) {
-          for (const part of mB[1].split(",")) {
-            const p = part.trim();
-            let mm = p.match(/^ahead (\d+)$/);
-            if (mm) ahead = Number(mm[1]);
-            mm = p.match(/^behind (\d+)$/);
-            if (mm) behind = Number(mm[1]);
+        } else {
+          const mUp = rest.match(/^(.+?)\.\.\.(.*)$/);
+          if (mUp) {
+            branch = mUp[1].trim();
+            rest = mUp[2];
+          } else {
+            const mBr = rest.match(/^(\S+)/);
+            branch = mBr ? mBr[1] : rest;
+            rest = "";
+          }
+          const mB = rest.match(/\[([^\]]*)\]$/);
+          if (mB) {
+            for (const part of mB[1].split(",")) {
+              const p = part.trim();
+              let mm = p.match(/^ahead (\d+)$/);
+              if (mm) ahead = Number(mm[1]);
+              mm = p.match(/^behind (\d+)$/);
+              if (mm) behind = Number(mm[1]);
+            }
           }
         }
       }
@@ -1697,8 +1723,11 @@ app.post("/api/github/repos/:id/action", async (req, res, next) => {
     }
     if (action === "force-push") {
       // 登録済みのユーザー名とPATを利用して、リモート履歴をローカルの内容で強制的に上書きpushする
-      // （--force-with-lease のため、リモートが想定外の状態に進んでいた場合は拒否される）
-      const r = await runGit(repo.path, ["push", "--force-with-lease", "origin", "main"], 180000);
+      // （--force-with-lease のため、リモートが想定外の状態に進んでいた場合は拒否される）。
+      // 対象ブランチは現在のブランチ（取得できなければ main）を使う。
+      const brR = await runGit(repo.path, ["branch", "--show-current"], 5000);
+      const curBranch = (brR.stdout || "").trim() || "main";
+      const r = await runGit(repo.path, ["push", "--force-with-lease", "origin", curBranch], 180000);
       const output = (r.stdout + r.stderr).trim();
       return res.json({ ok: r.code === 0, action, code: r.code, output });
     }

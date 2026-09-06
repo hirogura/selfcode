@@ -29,6 +29,9 @@ for arg in "$@"; do
       echo "使い方: sudo bash install-selfcode.sh [インストール先ディレクトリ]"
       exit 0
       ;;
+    -y|--yes)
+      # 確認なしで進める（このスクリプト自体に対話入力は無いため何もしない）
+      ;;
     *) INSTALL_DIR="$arg" ;;
   esac
 done

@@ -547,8 +547,8 @@ const App = (() => {
   }
 
   async function refreshTree() {
-    els.tree.innerHTML = "";
-    populate("", els.tree, 0);
+    // renderTree と同じ構造（ルートノード付き）で再構築する
+    renderTree();
   }
 
   // 展開中のフォルダをすべて折りたたむ（ルート＝ワークスペース自体は常に展開表示のまま）
@@ -910,7 +910,8 @@ const App = (() => {
     const node = pane.node;
     // 親が横並び(row)なら縦に、それ以外は横に分割してグリッド状にする
     const dir = node.parent && node.parent.kind === "row" ? "col" : "row";
-    const newPane = createPane(pane.cwd);
+    // 新しいペインは元のペインの cwd・ユーザーを引き継ぐ
+    const newPane = createPane(pane.cwd, undefined, pane.user);
     const newNode = paneNode(newPane);
     newPane.node = newNode;
     const wrap = splitNode(dir, node, newNode);
