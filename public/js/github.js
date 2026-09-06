@@ -4,11 +4,13 @@ const GithubPanel = (() => {
   const $ = (id) => document.getElementById(id);
   const KEY = "selfcode.githubVisible";
   const SETTINGS_COLLAPSED_KEY = "selfcode.settingsCollapsed";
+  const TEMPLATES_COLLAPSED_KEY = "selfcode.templatesCollapsed";
   const REPOS_COLLAPSED_KEY = "selfcode.reposCollapsed";
   let collapsedRepos = {};
   let loaded = false;
   let state = { configured: false, username: "", hasToken: false, repos: [] };
   let lastRegistered = [];
+  let templatesCache = null;
 
   function esc(s) {
     return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -711,6 +713,74 @@ const GithubPanel = (() => {
     }
   }
 
+  // ---- テンプレート（.gitignore / AGENTS.md の作成時に使う文面の編集） ----
+
+  function setTemplatesStatus(msg, ok) {
+    const st = $("gh-templates-status");
+    if (!st) return;
+    st.textContent = msg;
+    st.classList.toggle("ok", ok === true);
+    st.classList.toggle("err", ok === false);
+  }
+
+  async function ensureTemplates() {
+    if (templatesCache) return templatesCache;
+    templatesCache = await API.github.templates();
+    return templatesCache;
+  }
+
+  // 「テンプレート」内の gitignore / AGENTS.md ボタン: 対応する編集欄を開閉する
+  async function toggleTemplateEditor(which) {
+    const gitEd = $("gh-tpl-gitignore-editor");
+    const agEd = $("gh-tpl-agents-editor");
+    try {
+      const t = await ensureTemplates();
+      if (which === "gitignore") {
+        if (document.activeElement !== $("gh-tpl-gitignore-text")) $("gh-tpl-gitignore-text").value = t.gitignore || "";
+        gitEd.classList.toggle("hidden");
+        agEd.classList.add("hidden");
+      } else {
+        if (document.activeElement !== $("gh-tpl-agents-text")) $("gh-tpl-agents-text").value = t.agentsMd || "";
+        agEd.classList.toggle("hidden");
+        gitEd.classList.add("hidden");
+      }
+      setTemplatesStatus("", undefined);
+    } catch (e) {
+      setTemplatesStatus("テンプレートの読み込みに失敗: " + e.message, false);
+    }
+  }
+
+  // 片方だけ編集して保存しても、もう片方は取得済みの現在値で上書きされないよう両方送る
+  async function saveTemplatesFromEditors() {
+    try {
+      const t = await ensureTemplates();
+      const gitignore = $("gh-tpl-gitignore-text").value;
+      const agentsMd = $("gh-tpl-agents-text").value || t.agentsMd || "";
+      const res = await API.github.saveTemplates(gitignore, agentsMd);
+      templatesCache = { gitignore: res.gitignore, agentsMd: res.agentsMd };
+      setTemplatesStatus("テンプレートを保存しました", true);
+      toast("テンプレートを保存しました");
+    } catch (e) {
+      setTemplatesStatus("保存に失敗: " + e.message, false);
+      toast(e.message, true);
+    }
+  }
+
+  async function resetTemplates() {
+    if (!confirm("両方のテンプレート（.gitignore / AGENTS.md）を既定値に戻しますか？")) return;
+    try {
+      const res = await API.github.resetTemplates();
+      templatesCache = { gitignore: res.gitignore, agentsMd: res.agentsMd };
+      $("gh-tpl-gitignore-text").value = res.gitignore || "";
+      $("gh-tpl-agents-text").value = res.agentsMd || "";
+      setTemplatesStatus("テンプレートを既定値に戻しました", true);
+      toast("テンプレートを既定値に戻しました");
+    } catch (e) {
+      setTemplatesStatus("リセットに失敗: " + e.message, false);
+      toast(e.message, true);
+    }
+  }
+
   function isPullRemoteError(output) {
     if (!output) return false;
     const lower = String(output).toLowerCase();
@@ -927,6 +997,27 @@ const GithubPanel = (() => {
     $("gh-repos-collapse").onclick = collapseAllRepos;
     $("gh-repos-refresh").onclick = renderRepos;
     $("gh-repos").addEventListener("click", onReposClick);
+    $("gh-tpl-gitignore-btn").onclick = () => toggleTemplateEditor("gitignore");
+    $("gh-tpl-agents-btn").onclick = () => toggleTemplateEditor("agentsMd");
+    $("gh-tpl-gitignore-save").onclick = saveTemplatesFromEditors;
+    $("gh-tpl-agents-save").onclick = saveTemplatesFromEditors;
+    $("gh-tpl-reset").onclick = resetTemplates;
+    $("gh-tpl-reset-2").onclick = resetTemplates;
+    $("gh-templates-toggle").onclick = () => {
+      const sec = $("gh-templates-section");
+      const collapsed = sec.classList.toggle("collapsed");
+      $("gh-templates-toggle").textContent = collapsed ? "▸" : "▾";
+      $("gh-templates-toggle").title = collapsed ? "ひらく" : "たたむ";
+      try { localStorage.setItem(TEMPLATES_COLLAPSED_KEY, collapsed ? "1" : "0"); } catch {}
+    };
+    {
+      const collapsed = localStorage.getItem(TEMPLATES_COLLAPSED_KEY) === "1";
+      if (collapsed) {
+        $("gh-templates-section").classList.add("collapsed");
+        $("gh-templates-toggle").textContent = "▸";
+        $("gh-templates-toggle").title = "ひらく";
+      }
+    }
     $("gh-settings-toggle").onclick = () => {
       const sec = $("gh-settings-section");
       const collapsed = sec.classList.toggle("collapsed");

@@ -714,6 +714,23 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
   overflow-y: auto;
 }
 .gh-add { border-top: 1px solid var(--border); padding-bottom: 8px; }
+.gh-tpl-editor.hidden { display: none; }
+.gh-tpl-text {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: var(--fg);
+  outline: none;
+  font-size: 12px;
+  font-family: var(--mono);
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 220px;
+  resize: vertical;
+  white-space: pre;
+}
+.gh-tpl-text:focus { border-color: var(--accent-2); }
 .gh-add-actions { display: flex; gap: 6px; padding: 8px 10px 0; }
 .gh-own {
   margin: 8px 10px 0;

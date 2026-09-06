@@ -1750,8 +1750,10 @@ app.post("/api/github/repos/:id/action", async (req, res, next) => {
   }
 });
 
-// 登録済みリポジトリのルートに .gitignore を作成する（既に存在する場合は何もしない）
-const GITIGNORE_TEMPLATE = [
+// 登録済みリポジトリのルートに .gitignore / AGENTS.md を作成する際のテンプレート。
+// 「テンプレート」セクションから編集でき、サーバー側の JSON に保存する（未保存なら既定値を使う）。
+const TEMPLATES_CONFIG = process.env.SELFCODE_TEMPLATES_CONFIG || "/opt/lxd-data/note/selfcode/selfcode-templates.json";
+const DEFAULT_GITIGNORE_TEMPLATE = [
   ".env",
   ".env.*",
   "!.env.example",
@@ -1800,11 +1802,11 @@ app.post("/api/github/repos/:id/gitignore", async (req, res, next) => {
     }
     if (exists) return res.json({ ok: false, existed: true, path: target });
     if (containerCtx) {
-      await runContainer(["tee", target], { input: Buffer.from(GITIGNORE_TEMPLATE, "utf8") });
+      await runContainer(["tee", target], { input: Buffer.from(await currentGitignoreTemplate(), "utf8") });
     } else {
       const abs = resolveRel(target);
       await fsp.mkdir(path.dirname(abs), { recursive: true });
-      await fsp.writeFile(abs, GITIGNORE_TEMPLATE);
+      await fsp.writeFile(abs, await currentGitignoreTemplate());
     }
     res.json({ ok: true, created: true, path: target });
   } catch (e) {
@@ -1813,7 +1815,7 @@ app.post("/api/github/repos/:id/gitignore", async (req, res, next) => {
 });
 
 // 登録済みリポジトリのルートに AGENTS.md を作成する（既に存在する場合は何もしない）
-const AGENTS_MD_TEMPLATE = [
+const DEFAULT_AGENTS_MD_TEMPLATE = [
   "# 作業ルール",
   "",
   "## 応答言語",
@@ -1847,13 +1849,76 @@ app.post("/api/github/repos/:id/agents-md", async (req, res, next) => {
     }
     if (exists) return res.json({ ok: false, existed: true, path: target });
     if (containerCtx) {
-      await runContainer(["tee", target], { input: Buffer.from(AGENTS_MD_TEMPLATE, "utf8") });
+      await runContainer(["tee", target], { input: Buffer.from(await currentAgentsMdTemplate(), "utf8") });
     } else {
       const abs = resolveRel(target);
       await fsp.mkdir(path.dirname(abs), { recursive: true });
-      await fsp.writeFile(abs, AGENTS_MD_TEMPLATE);
+      await fsp.writeFile(abs, await currentAgentsMdTemplate());
     }
     res.json({ ok: true, created: true, path: target });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// テンプレートの取得・保存・リセット（「テンプレート」セクションから編集する）
+let customTemplates = { gitignore: null, agentsMd: null };
+
+async function loadCustomTemplates() {
+  try {
+    const raw = await fsp.readFile(TEMPLATES_CONFIG, "utf8");
+    const d = JSON.parse(raw);
+    if (d && typeof d.gitignore === "string") customTemplates.gitignore = d.gitignore;
+    if (d && typeof d.agentsMd === "string") customTemplates.agentsMd = d.agentsMd;
+  } catch {}
+}
+
+async function saveCustomTemplates() {
+  await fsp.mkdir(path.dirname(TEMPLATES_CONFIG), { recursive: true });
+  await fsp.writeFile(TEMPLATES_CONFIG, JSON.stringify(customTemplates, null, 2));
+}
+
+async function currentGitignoreTemplate() {
+  if (customTemplates.gitignore !== null) return customTemplates.gitignore;
+  await loadCustomTemplates();
+  return customTemplates.gitignore !== null ? customTemplates.gitignore : DEFAULT_GITIGNORE_TEMPLATE;
+}
+
+async function currentAgentsMdTemplate() {
+  if (customTemplates.agentsMd !== null) return customTemplates.agentsMd;
+  await loadCustomTemplates();
+  return customTemplates.agentsMd !== null ? customTemplates.agentsMd : DEFAULT_AGENTS_MD_TEMPLATE;
+}
+
+loadCustomTemplates().catch(() => {});
+
+app.get("/api/github/templates", async (req, res, next) => {
+  try {
+    res.json({ gitignore: await currentGitignoreTemplate(), agentsMd: await currentAgentsMdTemplate() });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.put("/api/github/templates", async (req, res, next) => {
+  try {
+    const { gitignore, agentsMd } = req.body || {};
+    if (typeof gitignore !== "string" || typeof agentsMd !== "string") {
+      return res.status(400).json({ error: "gitignore と agentsMd を文字列で指定してください" });
+    }
+    customTemplates = { gitignore, agentsMd };
+    await saveCustomTemplates();
+    res.json({ ok: true, gitignore, agentsMd });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.post("/api/github/templates/reset", async (req, res, next) => {
+  try {
+    customTemplates = { gitignore: null, agentsMd: null };
+    try { await fsp.rm(TEMPLATES_CONFIG, { force: true }); } catch {}
+    res.json({ ok: true, gitignore: DEFAULT_GITIGNORE_TEMPLATE, agentsMd: DEFAULT_AGENTS_MD_TEMPLATE });
   } catch (e) {
     next(e);
   }

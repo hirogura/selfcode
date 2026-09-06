@@ -161,6 +161,34 @@
           </div>
           <div id="gh-repos" class="gh-repos"></div>
         </div>
+        <div id="gh-templates-section" class="gh-section">
+          <div class="gh-sec-head"><span>テンプレート</span><div class="gh-sec-actions"><button id="gh-templates-toggle" class="btn small" title="たたむ">▾</button></div></div>
+          <div class="gh-actions">
+            <button id="gh-tpl-gitignore-btn" class="btn small">gitignore</button>
+            <button id="gh-tpl-agents-btn" class="btn small">AGENTS.md</button>
+          </div>
+          <div id="gh-tpl-gitignore-editor" class="gh-tpl-editor hidden">
+            <div class="gh-field">
+              <label for="gh-tpl-gitignore-text">.gitignore のテンプレート</label>
+              <textarea id="gh-tpl-gitignore-text" class="gh-tpl-text" spellcheck="false" autocomplete="off"></textarea>
+            </div>
+            <div class="gh-actions">
+              <button id="gh-tpl-gitignore-save" class="btn small primary">保存</button>
+              <button id="gh-tpl-reset" class="btn small" title="両方のテンプレートを既定値に戻す">既定値に戻す</button>
+            </div>
+          </div>
+          <div id="gh-tpl-agents-editor" class="gh-tpl-editor hidden">
+            <div class="gh-field">
+              <label for="gh-tpl-agents-text">AGENTS.md のテンプレート</label>
+              <textarea id="gh-tpl-agents-text" class="gh-tpl-text" spellcheck="false" autocomplete="off"></textarea>
+            </div>
+            <div class="gh-actions">
+              <button id="gh-tpl-agents-save" class="btn small primary">保存</button>
+              <button id="gh-tpl-reset-2" class="btn small" title="両方のテンプレートを既定値に戻す">既定値に戻す</button>
+            </div>
+          </div>
+          <div id="gh-templates-status" class="gh-status"></div>
+        </div>
       </div>
     </aside>
 
