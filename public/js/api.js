@@ -108,6 +108,7 @@ const API = (() => {
       branch: (id, branch) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/action", { action: "branch", branch }),
       cleanupBranches: (id) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/action", { action: "cleanup" }),
       createGitignore: (id) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/gitignore"),
+      createAgentsMd: (id) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/agents-md"),
       addRemote: (id, url, branch, forceSync) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/remote", { url, branch, forceSync: forceSync || null }),
       firstPush: (id, url, branch) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/first-push", { url, branch }),
       remove: (id) => API.del("/api/github/repos/" + encodeURIComponent(id)),

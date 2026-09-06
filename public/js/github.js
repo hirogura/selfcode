@@ -325,6 +325,7 @@ const GithubPanel = (() => {
       '<button class="btn small" data-act="force-pull" title="ローカルの変更をすべて破棄し、リモートの最新状態に合わせる">強制pull</button>' +
       '<button class="btn small" data-act="status">状態</button>' +
       '<button class="btn small" data-act="gitignore" title=".gitignore が無い場合のみ作成する">gitignore</button>' +
+      '<button class="btn small" data-act="agents-md" title="AGENTS.md が無い場合のみ作成する">AGENTS.md</button>' +
       '<button class="btn small" data-act="commit">コミット</button>' +
       '<button class="btn small" data-act="cancel" title="最新コミットと未コミット変更をすべて破棄して直前のコミット状態に戻す">キャンセル</button>' +
       '<button class="btn small" data-act="push">push</button>' +
@@ -403,6 +404,10 @@ const GithubPanel = (() => {
     }
     if (btn.dataset.act === "gitignore") {
       doCreateGitignore(id, btn);
+      return;
+    }
+    if (btn.dataset.act === "agents-md") {
+      doCreateAgentsMd(id, btn);
       return;
     }
     if (btn.dataset.act === "first-push") {
@@ -686,6 +691,23 @@ const GithubPanel = (() => {
       toast(e.message, true);
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = "gitignore"; }
+    }
+  }
+
+  // AGENTS.md ボタン: リポジトリ内に無い場合のみ AGENTS.md を作成する
+  async function doCreateAgentsMd(id, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = "作成中…"; }
+    try {
+      const res = await API.github.createAgentsMd(id);
+      if (res.ok && res.created) {
+        toast("AGENTS.md を作成しました: " + (res.path || ""));
+      } else {
+        toast("既に AGENTS.md が存在するため作成しませんでした", true);
+      }
+    } catch (e) {
+      toast(e.message, true);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = "AGENTS.md"; }
     }
   }
 

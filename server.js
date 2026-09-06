@@ -287,7 +287,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "0.1.0",
+    version: "1.2.0",
     workspace: ROOT,
     container: containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null,
     opencode: { ready: oc.ready, version: oc.version },
@@ -1805,6 +1805,53 @@ app.post("/api/github/repos/:id/gitignore", async (req, res, next) => {
       const abs = resolveRel(target);
       await fsp.mkdir(path.dirname(abs), { recursive: true });
       await fsp.writeFile(abs, GITIGNORE_TEMPLATE);
+    }
+    res.json({ ok: true, created: true, path: target });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// 登録済みリポジトリのルートに AGENTS.md を作成する（既に存在する場合は何もしない）
+const AGENTS_MD_TEMPLATE = [
+  "# 作業ルール",
+  "",
+  "## 応答言語",
+  "- ユーザーへの返答・確認・質問はすべて日本語で行うこと。英語や中国語で返答しないこと。",
+  "- ただし、コード・コマンド・ファイル内容・固有名詞など、原文のままが適切なものは翻訳しないこと。",
+  "",
+  "## コミットメッセージ",
+  "- `Co-Authored-By:` / `Co-authored-by:` トレーラーを付けないこと。",
+  "- `Generated with Codebuff` のような帰属行・宣伝文を付けないこと。",
+  "- AI がコミットメッセージを生成した場合は、本文のみにして末尾の2行 (帰属行 + Co-Authored-By) を必ず削除してからコミットすること。",
+  "",
+  "## コミット前の個人情報チェック",
+  "- コミット前に `git diff` (必要なら `git diff --cached`) の内容を確認し、個人情報が含まれていないかチェックすること。",
+  "- 対象の例: LXD コンテナ名、Tailnet アドレス / MagicDNS ホスト名、IP アドレス、メールアドレス、API キー・トークンなどの秘密情報。",
+  "- 見つけた場合は、その箇所をマスク・ダミー値に置き換えるか、ファイルをコミット対象から外すこと。判断に迷う場合は勝手にコミットせず、ユーザーに確認すること。",
+  "",
+].join("\n");
+
+app.post("/api/github/repos/:id/agents-md", async (req, res, next) => {
+  try {
+    const id = String(req.params.id || "");
+    const repo = githubCfg.repos.find((r) => r.id === id);
+    if (!repo) return res.status(404).json({ error: "リポジトリが見つかりません" });
+    const target = (repo.path || "").replace(/\/+$/, "") + "/AGENTS.md";
+    // 既に存在する場合は作成しない
+    let exists = false;
+    if (containerCtx) {
+      try { await runContainer(["test", "-e", target]); exists = true; } catch {}
+    } else {
+      try { await fsp.access(resolveRel(target)); exists = true; } catch {}
+    }
+    if (exists) return res.json({ ok: false, existed: true, path: target });
+    if (containerCtx) {
+      await runContainer(["tee", target], { input: Buffer.from(AGENTS_MD_TEMPLATE, "utf8") });
+    } else {
+      const abs = resolveRel(target);
+      await fsp.mkdir(path.dirname(abs), { recursive: true });
+      await fsp.writeFile(abs, AGENTS_MD_TEMPLATE);
     }
     res.json({ ok: true, created: true, path: target });
   } catch (e) {
