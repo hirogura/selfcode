@@ -21,8 +21,18 @@ code-server のようにブラウザから使えて、opencodeやFreebuff、Goog
 
 ### 自動インストール（推奨）
 
+Ubuntu / Debian 系:
+
 ```bash
 sudo apt install -y git curl nodejs npm
+curl -fsSL https://raw.githubusercontent.com/hirogura/selfcode/main/install-selfcode.sh -o /tmp/install-selfcode.sh
+sudo bash /tmp/install-selfcode.sh
+```
+
+CachyOS / Arch 系（同一スクリプトで対応。`pacman` を自動判別します）:
+
+```bash
+sudo pacman -S --needed --noconfirm git curl nodejs npm
 curl -fsSL https://raw.githubusercontent.com/hirogura/selfcode/main/install-selfcode.sh -o /tmp/install-selfcode.sh
 sudo bash /tmp/install-selfcode.sh
 ```
@@ -78,8 +88,10 @@ PORT=3339 npm start
 | `SELFCODE_GITHUB_CONFIG` | `/opt/lxd-data/note/selfcode/selfcode-github.json` | GitHub 連携の設定保存先（ユーザー名・トークン・登録リポジトリ。トークンはブラウザに返さずサーバー側でのみ使用） |
 | `SELFCODE_TERM_STATE` | `/opt/lxd-data/note/selfcode/selfcode-term.json` | ターミナルのペイン構成（分割・cwd・id）の保存先。別のPCから同じ selfcode を開いても同じターミナルプロセスに再接続するために使う |
 | `SELFCODE_CHAT_STATE` | `/opt/lxd-data/note/selfcode/selfcode-chat.json` | チャットで選択中の opencode セッションとワークスペースの保存先 |
-| `SELFCODE_RESTART_CMD` | `systemctl restart selfcode` | 「リスタート」ボタンが実行するコマンド |
+| `SELFCODE_RESTART_CMD` | `systemctl restart selfcode` | 「リスタート」ボタンが実行するコマンド（Ubuntu / CachyOS ともに systemd のため共通） |
 | `SELFCODE_UPDATE_TIMEOUT` | `900000`（15分） | 「アップデート」ボタンの更新処理タイムアウト（ミリ秒） |
+| `SELFCODE_UPDATE_URL` | 本家 `install-selfcode.sh` の raw URL | 「アップデート」ボタンが取得するインストールスクリプトの URL（フォーク運用時のみ上書き） |
+| `SELFCODE_REPO_URL` | `https://github.com/hirogura/selfcode.git` | インストールスクリプトが clone するリポジトリ（フォーク運用時のみ上書き。`SELFCODE_REPO_URL=... sudo -E bash install-selfcode.sh`） |
 | `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD` | `opencode` / 自動生成 | opencode サーバーの認証 |
 | `OPENCODE_BIN` | `opencode` | opencode バイナリのパス |
 
@@ -125,7 +137,7 @@ sudo tailscale serve --bg --https=3339 http://127.0.0.1:3339
   - CLI が未インストールの場合は `[Y/n]` で確認（Enter または `y` で自動インストールして起動）
 - 右上の **一時SSH** ボタンで、agy などの OAuth 認証を手元 PC から行えるようにする（トグル）
   - **ON**: 選択中の LXD コンテナ（未選択ならホスト）の root パスワードを `selfcode` に設定し、SSH のパスワード認証・root ログインを有効化して sshd を再起動
-  - openssh-server が未導入の場合は確認を表示し、`y` で apt から自動インストールしてから有効化
+  - openssh-server が未導入の場合は確認を表示し、`y` で pacman（CachyOS/Arch）または apt（Debian系）から自動インストールしてから有効化
   - 手元 PC から `ssh -L <ポート>:localhost:<ポート> root@<IP>` でコンテナへポートを転送し、接続したら `agy` と入力して認証 URL を確認、手元 PC のブラウザで認証（Tailscale 利用時はマジックDNS名 `root@<ホスト名>` でも接続可能。手順は ON 時にターミナルへ案内表示）
   - 認証完了後、もう一度ボタンを押して **OFF** にすると、バックアップした sshd 設定と root パスワードを復元
 - EXPLORER のフォルダ（またはファイル）を右クリック → **ここで freebuff** で、そのフォルダをワークスペースとして freebuff を起動

@@ -17,7 +17,8 @@
 # ============================================================
 set -euo pipefail
 
-REPO_URL="https://github.com/hirogura/selfcode.git"
+# SELFCODE_REPO_URL でフォーク等への付け替え可（既定は本家 selfcode。CachyOS も同一スクリプトを使う）
+REPO_URL="${SELFCODE_REPO_URL:-https://github.com/hirogura/selfcode.git}"
 BRANCH="main"
 DEFAULT_DIR="/opt/lxd-data/selfcode"
 
@@ -46,9 +47,18 @@ maybe_sudo() {
   if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo "$@"; fi
 }
 
-# ---- 前提条件チェック ----
+# ---- 前提条件チェック（Ubuntu/Debian と Arch/CachyOS を自動判別） ----
+pkg_install_hint() {
+  if command -v pacman >/dev/null 2>&1; then
+    echo "sudo pacman -S --needed --noconfirm git curl nodejs npm"
+  elif command -v apt-get >/dev/null 2>&1; then
+    echo "sudo apt-get install -y git curl nodejs npm"
+  else
+    echo "パッケージマネージャで git / curl / nodejs / npm をインストール"
+  fi
+}
 for cmd in git curl node npm; do
-  command -v "$cmd" >/dev/null 2>&1 || die "'$cmd' が見つかりません。先にインストールしてください (例: sudo apt-get install -y git curl nodejs npm)"
+  command -v "$cmd" >/dev/null 2>&1 || die "'$cmd' が見つかりません。先にインストールしてください (例: $(pkg_install_hint))"
 done
 
 NODE_MAJOR="$(node -e 'console.log(process.versions.node.split(".")[0])')"

@@ -30,6 +30,18 @@ const HIDDEN = new Set(["node_modules", ".git", "dist", "build", ".next", "__pyc
 // プロセスが root で動いているか（systemd サービスは root で起動する）
 const IS_ROOT = typeof process.getuid === "function" && process.getuid() === 0;
 
+// 稼働ディストロの判別（Ubuntu/Debian と Arch/CachyOS でパッケージ操作を切り替えるため）。
+// /etc/os-release の ID を見る。取得できなければ "unknown"。
+function detectDistro() {
+  try {
+    const text = fs.readFileSync("/etc/os-release", "utf8");
+    const m = text.match(/^ID=(.+)$/m);
+    if (m) return m[1].trim().replace(/^"|"$/g, "").toLowerCase();
+  } catch {}
+  return "unknown";
+}
+const DISTRO = detectDistro();
+
 // ホスト側ターミナルの既定ユーザー。SELFCODE_TERM_USER が指定されていればそれを使い、
 // 無ければ現在のプロセスユーザー（root なら /etc/passwd から uid 1000..65533 の最初の実ユーザーを探す）。
 // システムユーザー（nobody や nologin シェル）は除外する。
@@ -301,8 +313,9 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "1.3.0",
+    version: "1.4.0",
     workspace: ROOT,
+    distro: DISTRO,
     container: containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null,
     opencode: { ready: oc.ready, version: oc.version },
     termUser: TERM_USER,
@@ -440,12 +453,16 @@ async function sshdInstalled(target) {
   }
 }
 
-// openssh-server を apt でインストールする（未導入時に y が選ばれた場合）
+// openssh-server をインストールする（未導入時に y が選ばれた場合）。
+// Ubuntu/Debian (apt) と Arch/CachyOS (pacman) を自動判別し、その他 (apk/dnf/yum) にも対応する。
 async function installOpensshServer(target) {
   const cmd =
-    'command -v apt-get >/dev/null 2>&1 || { echo "[selfcode] apt-get が見つかりません（Ubuntu/Debian 以外では手動で openssh-server を導入してください）" >&2; exit 1; }; ' +
-    "apt-get update || true; " +
-    "DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server";
+    'if command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm openssh; ' +
+    'elif command -v apt-get >/dev/null 2>&1; then apt-get update || true; DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server; ' +
+    'elif command -v apk >/dev/null 2>&1; then apk add --no-cache openssh; ' +
+    'elif command -v dnf >/dev/null 2>&1; then dnf install -y openssh-server; ' +
+    'elif command -v yum >/dev/null 2>&1; then yum install -y openssh-server; ' +
+    'else echo "[selfcode] 対応するパッケージマネージャが見つかりません（手動で openssh-server / openssh を導入してください）" >&2; exit 1; fi';
   if (target.type === "container") await runContainer(["sh", "-c", cmd], { timeoutMs: 300000 });
   else await runCmd("sh", ["-c", cmd], 300000);
 }
@@ -2110,11 +2127,12 @@ const INSTALL_CMDS = {
   opencode:
     'export PATH="$HOME/.opencode/bin:$PATH"; curl -fsSL https://opencode.ai/install | bash; if [ "$(id -u)" = "0" ] && [ -f /root/.opencode/bin/opencode ]; then cp -f /root/.opencode/bin/opencode /usr/local/bin/opencode 2>/dev/null && chmod 755 /usr/local/bin/opencode 2>/dev/null || true; fi',
   // freebuff は npm グローバルインストール。npm / node が無い環境（LXD コンテナ等）でも
-  // パッケージマネージャ（apt / apk / dnf / yum）から nodejs / npm を自動インストールしてから進める。
+  // パッケージマネージャ（pacman / apt / apk / dnf / yum）から nodejs / npm を自動インストールしてから進める。
   // freebuff CLI は Node.js 18+ 必須のため、バージョンも確認する。
   freebuff:
     "if ! command -v npm >/dev/null 2>&1; then echo '[selfcode] npm が見つかりません。nodejs / npm をインストールします…'; " +
-      "if command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y -qq nodejs npm; " +
+      "if command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm nodejs npm; " +
+      "elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y -qq nodejs npm; " +
       "elif command -v apk >/dev/null 2>&1; then apk add --no-cache nodejs npm; " +
       "elif command -v dnf >/dev/null 2>&1; then dnf install -y nodejs npm; " +
       "elif command -v yum >/dev/null 2>&1; then yum install -y nodejs npm; " +
@@ -2310,19 +2328,24 @@ app.post("/api/restart", (req, res) => {
 // アップデート: 公式インストールスクリプトの取得 → 実行。
 // スクリプト内で git pull / npm install が行われ、完了後に「リスタート」で新コードへ切り替わる。
 // root 以外の所有者リポジトリでも動くよう safe.directory を事前に登録する。
-const UPDATE_SCRIPT = `
+// 取得元は SELFCODE_UPDATE_URL で上書き可（既定は本家 selfcode。Ubuntu/CachyOS 共通）。
+const UPDATE_URL_DEFAULT = "https://raw.githubusercontent.com/hirogura/selfcode/main/install-selfcode.sh";
+function buildUpdateScript() {
+  const url = process.env.SELFCODE_UPDATE_URL || UPDATE_URL_DEFAULT;
+  return `
 set -e
 git config --global --add safe.directory '${__dirname}' >/dev/null 2>&1 || true
 update_tmp="$(mktemp /tmp/selfcode-install-XXXXXX.sh)"
 trap 'rm -f "$update_tmp"' EXIT
-curl -fsSL https://raw.githubusercontent.com/hirogura/selfcode/main/install-selfcode.sh -o "$update_tmp"
+curl -fsSL ${shq(url)} -o "$update_tmp"
 bash "$update_tmp"
 `;
+}
 
 app.post("/api/update", async (req, res, next) => {
   console.log("[selfcode] update requested");
   try {
-    const out = await runCmd("bash", ["-c", UPDATE_SCRIPT], UPDATE_TIMEOUT_MS);
+    const out = await runCmd("bash", ["-c", buildUpdateScript()], UPDATE_TIMEOUT_MS);
     const log = out.toString("utf8").trim();
     console.log("[selfcode] update finished\n" + log.split("\n").slice(-10).join("\n"));
     res.json({ ok: true, log });
