@@ -7,9 +7,21 @@ import net from "node:net";
 import os from "node:os";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import express from "express";
 import { WebSocketServer } from "ws";
-import pty from "node-pty";
+
+// node-pty はネイティブモジュール (node-gyp ビルド) のため、ビルド漏れでは
+// 起動直後に分かりにくいスタックトレースで落ちる。原因を明示して終了する。
+const require = createRequire(import.meta.url);
+let pty;
+try {
+  pty = require("node-pty");
+} catch (e) {
+  console.error("[selfcode] node-pty ネイティブモジュールを読み込めません: " + (e && e.message ? e.message : e));
+  console.error("[selfcode] 次を実行して再ビルドしてください: npm install-scripts approve node-pty && npm rebuild node-pty");
+  process.exit(1);
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

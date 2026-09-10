@@ -24,7 +24,7 @@ code-server のようにブラウザから使えて、opencodeやFreebuff、Goog
 Ubuntu / Debian 系:
 
 ```bash
-sudo apt install -y git curl nodejs npm
+sudo apt install -y git curl nodejs npm build-essential python3
 curl -fsSL https://raw.githubusercontent.com/hirogura/selfcode/main/install-selfcode.sh -o /tmp/install-selfcode.sh
 sudo bash /tmp/install-selfcode.sh
 ```
@@ -32,7 +32,7 @@ sudo bash /tmp/install-selfcode.sh
 CachyOS / Arch 系（同一スクリプトで対応。`pacman` を自動判別します）:
 
 ```bash
-sudo pacman -S --needed --noconfirm git curl nodejs npm
+sudo pacman -S --needed --noconfirm git curl nodejs npm base-devel python
 curl -fsSL https://raw.githubusercontent.com/hirogura/selfcode/main/install-selfcode.sh -o /tmp/install-selfcode.sh
 sudo bash /tmp/install-selfcode.sh
 ```

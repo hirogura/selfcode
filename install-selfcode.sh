@@ -61,6 +61,11 @@ for cmd in git curl node npm; do
   command -v "$cmd" >/dev/null 2>&1 || die "'$cmd' が見つかりません。先にインストールしてください (例: $(pkg_install_hint))"
 done
 
+# node-pty (ターミナル用ネイティブモジュール) のビルドに必要
+for cmd in python3 make gcc; do
+  command -v "$cmd" >/dev/null 2>&1 || die "'$cmd' が見つかりません。node-pty のビルドに必要です。先にインストールしてください (Arch/CachyOS 例: sudo pacman -S --needed base-devel python / Ubuntu 例: sudo apt-get install -y build-essential python3)"
+done
+
 NODE_MAJOR="$(node -e 'console.log(process.versions.node.split(".")[0])')"
 if [ "$NODE_MAJOR" -lt 18 ]; then
   die "Node.js 18 以上が必要です (現在: $(node --version))"
@@ -83,6 +88,22 @@ fi
 # ---- 依存関係のインストール ----
 info "npm install を実行中..."
 maybe_sudo sh -c "cd '$INSTALL_DIR' && npm install --no-audit --no-fund"
+
+# ---- node-pty ネイティブモジュールのビルド確認 ----
+# npm 12 以降はインストールスクリプトが既定でブロックされるため、node-pty の
+# ビルド (node-gyp rebuild) がスキップされて起動時に落ちることがある。
+# package.json の allowScripts で許可済みだが、念のため明示的に承認・再ビルドする
+# (古い npm には install-scripts サブコマンドが無いためガードする)。
+if (maybe_sudo sh -c "cd '$INSTALL_DIR' && npm install-scripts --help >/dev/null 2>&1"); then
+  info "node-pty のインストールスクリプトを承認・再ビルド中..."
+  maybe_sudo sh -c "cd '$INSTALL_DIR' && npm install-scripts approve node-pty >/dev/null && npm rebuild node-pty --no-audit --no-fund"
+else
+  maybe_sudo sh -c "cd '$INSTALL_DIR' && npm rebuild node-pty --no-audit --no-fund"
+fi
+# ビルド成果物が無ければここで失敗させる (起動時の分かりにくいクラッシュを防ぐ)
+if [ ! -f "$INSTALL_DIR/node_modules/node-pty/build/Release/pty.node" ]; then
+  die "node-pty のビルドに失敗しました。ビルドツール (base-devel / build-essential, python3) を確認して再実行してください"
+fi
 
 # ---- systemd サービス登録（自動） ----
 if [ -d /etc/systemd/system ] && command -v systemctl >/dev/null 2>&1; then

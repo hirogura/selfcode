@@ -18,5 +18,8 @@
     "monaco-editor": "^0.52.2",
     "node-pty": "^1.0.0",
     "ws": "^8.18.0"
+  },
+  "allowScripts": {
+    "node-pty@1.1.0": true
   }
 }
