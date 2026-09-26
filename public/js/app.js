@@ -23,7 +23,7 @@ const App = (() => {
   let containerInfo = null; // { name, runtime } | null
   let termUser = "root"; // ホスト側ターミナルの既定ユーザー（/api/status から取得）
   let termIsRoot = false; // サーバーが root で動いているか（root のときのみユーザー切替可能）
-  let rootMode = false; // root モード（ON で opencode/freebuff/agy を root で実行）
+  let rootMode = false; // root モード（ON で opencode/cline/freebuff/agy を root で実行）
   let editor = null;
   const docs = new Map();
   const models = new Map();
@@ -378,6 +378,7 @@ const App = (() => {
       items.push({ sep: true });
       items.push({ label: "ここでチャット", act: () => Chat.setDirectory(absDir(target.dir)) });
       items.push({ label: "ここで opencode", act: () => openOpencodeAt(target.dir) });
+      items.push({ label: "ここで cline", act: () => openClineAt(target.dir) });
       items.push({ label: "ここで freebuff", act: () => openFreebuffAt(target.dir) });
       items.push({ label: "ここで agy", act: () => openAgyAt(target.dir) });
       items.push({ label: "パスをコピー", act: () => copyPath(target.path) });
@@ -392,6 +393,7 @@ const App = (() => {
       items.push({ sep: true });
       items.push({ label: "ここでチャット", act: () => Chat.setDirectory(absDir(target.path)) });
       items.push({ label: "ここで opencode", act: () => openOpencodeAt(target.path) });
+      items.push({ label: "ここで cline", act: () => openClineAt(target.path) });
       items.push({ label: "ここで freebuff", act: () => openFreebuffAt(target.path) });
       items.push({ label: "ここで agy", act: () => openAgyAt(target.path) });
       items.push({ label: "パスをコピー", act: () => copyPath(target.path) });
@@ -866,8 +868,8 @@ const App = (() => {
           pane.running = true;
           pane.runningCmd = msg.cmd || "";
           updateFreebuffBtn();
-          if (msg.cmd === "freebuff" || msg.cmd === "agy") {
-            const label = msg.cmd === "freebuff" ? "freebuff" : "agy (Antigravity CLI)";
+          if (msg.cmd === "freebuff" || msg.cmd === "cline" || msg.cmd === "agy") {
+            const label = msg.cmd === "freebuff" ? "freebuff" : msg.cmd === "cline" ? "cline" : "agy (Antigravity CLI)";
             pane.term.reset();
             pane.term.write(
               msg.installing
@@ -1242,11 +1244,12 @@ const App = (() => {
     const p = activePane();
     const cmd = p ? p.runningCmd || "" : "";
     $("btn-freebuff").classList.toggle("active", cmd === "freebuff");
+    $("btn-cline").classList.toggle("active", cmd === "cline");
     $("btn-opencode").classList.toggle("active", cmd === "opencode");
     $("btn-ag").classList.toggle("active", cmd === "agy");
   }
 
-  // 「freebuff」/「opencode」/「agy」起動処理（ツールバーおよび右クリックメニュー共通）
+  // 「freebuff」/「cline」/「opencode」/「agy」起動処理（ツールバーおよび右クリックメニュー共通）
   // ターミナルウィンドウが開いているときは分割して新しいペインで起動する。
   // 閉じているときは分割せず、最初のサブウィンドウで起動する。
   // relPath が指定された場合は作業ディレクトリ(cwd)を設定する。
@@ -1275,6 +1278,10 @@ const App = (() => {
     openToolInTerminal("freebuff");
   }
 
+  function openClineTerminal() {
+    openToolInTerminal("cline");
+  }
+
   function openOpencodeTerminal() {
     openToolInTerminal("opencode");
   }
@@ -1286,7 +1293,7 @@ const App = (() => {
   function toggleRootMode() {
     rootMode = !rootMode;
     $("btn-root").classList.toggle("active", rootMode);
-    toast(rootMode ? "Root モード ON: opencode/freebuff/agy が root で実行されます" : "Root モード OFF");
+    toast(rootMode ? "Root モード ON: opencode/cline/freebuff/agy が root で実行されます" : "Root モード OFF");
   }
 
   let sshTempOn = false; // 「一時SSH」ボタンの状態（/api/ssh-temp と同期）
@@ -1430,13 +1437,17 @@ const App = (() => {
     }, 100);
   }
 
-  // 指定フォルダを cwd として CLI ツール（opencode / freebuff / agy）を起動する（右クリックメニュー用）
+  // 指定フォルダを cwd として CLI ツール（opencode / cline / freebuff / agy）を起動する（右クリックメニュー用）
   function openToolAt(cmd, relPath) {
     openToolInTerminal(cmd, relPath);
   }
 
   function openFreebuffAt(relPath) {
     openToolAt("freebuff", relPath);
+  }
+
+  function openClineAt(relPath) {
+    openToolAt("cline", relPath);
   }
 
   function openOpencodeAt(relPath) {
@@ -1939,6 +1950,7 @@ const App = (() => {
     $("btn-terminal").onclick = toggleTerminal;
     $("btn-chat").onclick = toggleChat;
     $("btn-freebuff").onclick = openFreebuffTerminal;
+    $("btn-cline").onclick = openClineTerminal;
     $("btn-opencode").onclick = openOpencodeTerminal;
     $("btn-ag").onclick = openAgTerminal;
     $("btn-root").onclick = toggleRootMode;

@@ -325,7 +325,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "1.4.0",
+    version: "1.5.0",
     workspace: ROOT,
     distro: DISTRO,
     container: containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null,
@@ -2138,7 +2138,7 @@ function containerBin(runtime) {
 const INSTALL_CMDS = {
   opencode:
     'export PATH="$HOME/.opencode/bin:$PATH"; curl -fsSL https://opencode.ai/install | bash; if [ "$(id -u)" = "0" ] && [ -f /root/.opencode/bin/opencode ]; then cp -f /root/.opencode/bin/opencode /usr/local/bin/opencode 2>/dev/null && chmod 755 /usr/local/bin/opencode 2>/dev/null || true; fi',
-  // freebuff は npm グローバルインストール。npm / node が無い環境（LXD コンテナ等）でも
+  // freebuff / cline は npm グローバルインストール。npm / node が無い環境（LXD コンテナ等）でも
   // パッケージマネージャ（pacman / apt / apk / dnf / yum）から nodejs / npm を自動インストールしてから進める。
   // freebuff CLI は Node.js 18+ 必須のため、バージョンも確認する。
   freebuff:
@@ -2152,6 +2152,16 @@ const INSTALL_CMDS = {
       "if ! command -v node >/dev/null 2>&1 || ! node -e \"if(Number(process.versions.node.split('.')[0])<18)process.exit(1)\"; then " +
       "echo '[selfcode] Node.js 18 以上が必要です。古い Node が入っている場合は更新してください'; exit 1; fi; " +
       'if [ "$(id -u)" = "0" ]; then npm install -g freebuff; else sudo npm install -g freebuff; fi',
+  // cline も npm グローバルインストール（npm install -g cline）。nodejs / npm が無ければ自動導入する。
+  cline:
+    "if ! command -v npm >/dev/null 2>&1; then echo '[selfcode] npm が見つかりません。nodejs / npm をインストールします…'; " +
+      "if command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm nodejs npm; " +
+      "elif command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y -qq nodejs npm; " +
+      "elif command -v apk >/dev/null 2>&1; then apk add --no-cache nodejs npm; " +
+      "elif command -v dnf >/dev/null 2>&1; then dnf install -y nodejs npm; " +
+      "elif command -v yum >/dev/null 2>&1; then yum install -y nodejs npm; " +
+      "else echo '[selfcode] 対応するパッケージマネージャがありません。nodejs / npm を手動でインストールしてください'; exit 1; fi; fi; " +
+      'if [ "$(id -u)" = "0" ]; then npm install -g cline; else sudo npm install -g cline; fi',
   agy:
     'export PATH="$HOME/.local/bin:$PATH"; curl -fsSL https://antigravity.google/cli/install.sh | bash; if [ "$(id -u)" = "0" ] && [ -f /root/.local/bin/agy ]; then cp -f /root/.local/bin/agy /usr/local/bin/agy 2>/dev/null && chmod 755 /usr/local/bin/agy 2>/dev/null || true; fi',
 };
@@ -2640,7 +2650,7 @@ wss.on("connection", (ws, req) => {
     if (!st.isDirectory()) throw new Error("not a directory");
     // root モードが ON の場合は root で実行する
     const execUser = (forceRoot && IS_ROOT) ? "root" : rec.user;
-    // 未インストールのコマンド（opencode / freebuff / agy）は確認してからインストールする
+    // 未インストールのコマンド（opencode / freebuff / cline / agy）は確認してからインストールする
     // （判定はターミナルが実際に使う PATH = env.PATH で行う。agy は端末ユーザーの ~/.local/bin も対象）
     const userHome = execUser ? userHomeOf(execUser) : (process.env.HOME || os.homedir());
     if (!findBin(cmd, env.PATH, userHome) && INSTALL_CMDS[cmd]) {
