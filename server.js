@@ -325,7 +325,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "1.5.0",
+    version: "1.5.1",
     workspace: ROOT,
     distro: DISTRO,
     container: containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null,
@@ -2352,27 +2352,33 @@ app.post("/api/restart", (req, res) => {
 // root 以外の所有者リポジトリでも動くよう safe.directory を事前に登録する。
 // 取得元は SELFCODE_UPDATE_URL で上書き可（既定は本家 selfcode。Ubuntu/CachyOS 共通）。
 const UPDATE_URL_DEFAULT = "https://raw.githubusercontent.com/hirogura/selfcode/main/install-selfcode.sh";
-function buildUpdateScript() {
+function buildUpdateScript(force) {
   const url = process.env.SELFCODE_UPDATE_URL || UPDATE_URL_DEFAULT;
+  const forceFlag = force ? " --force" : "";
   return `
 set -e
 git config --global --add safe.directory '${__dirname}' >/dev/null 2>&1 || true
 update_tmp="$(mktemp /tmp/selfcode-install-XXXXXX.sh)"
 trap 'rm -f "$update_tmp"' EXIT
 curl -fsSL ${shq(url)} -o "$update_tmp"
-bash "$update_tmp"
+bash "$update_tmp"${forceFlag}
 `;
 }
 
 app.post("/api/update", async (req, res, next) => {
-  console.log("[selfcode] update requested");
+  const force = !!(req.body && req.body.force);
+  console.log("[selfcode] update requested" + (force ? " (force)" : ""));
   try {
-    const out = await runCmd("bash", ["-c", buildUpdateScript()], UPDATE_TIMEOUT_MS);
+    const out = await runCmd("bash", ["-c", buildUpdateScript(force)], UPDATE_TIMEOUT_MS);
     const log = out.toString("utf8").trim();
     console.log("[selfcode] update finished\n" + log.split("\n").slice(-10).join("\n"));
-    res.json({ ok: true, log });
+    res.json({ ok: true, log, force });
   } catch (e) {
-    res.status(500).json({ error: "アップデートに失敗しました: " + (e.message || e) });
+    const msg = e.message || String(e);
+    // ローカルの変更で pull が失敗した場合は強制アップデートで復旧できるため、
+    // フロントで確認表示を出せるよう needForce フラグを付けて 409 で返す
+    const needForce = !force && /would be overwritten|local changes|stash them|Your local changes/i.test(msg);
+    res.status(needForce ? 409 : 500).json({ error: "アップデートに失敗しました: " + msg, needForce });
   }
 });
 

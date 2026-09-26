@@ -28,6 +28,7 @@ const API = (() => {
         `${res.status} ${res.statusText}`;
       const err = new Error(msg);
       err.status = res.status;
+      if (data && data.needForce) err.needForce = true;
       throw err;
     }
     return data;
@@ -93,7 +94,7 @@ const API = (() => {
       put: (content) => API.put("/api/memo", { content }),
     },
     restart: () => API.post("/api/restart", {}, undefined, 5000),
-    update: () => API.post("/api/update", {}, undefined, 960000),
+    update: (force) => API.post("/api/update", { force: !!force }, undefined, 960000),
 
     github: {
       status: () => API.get("/api/github/status"),

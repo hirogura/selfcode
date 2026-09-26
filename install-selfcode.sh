@@ -24,14 +24,19 @@ DEFAULT_DIR="/opt/lxd-data/selfcode"
 
 # ---- 引数解析 ----
 INSTALL_DIR="$DEFAULT_DIR"
+FORCE=0
 for arg in "$@"; do
   case "$arg" in
     -h|--help)
-      echo "使い方: sudo bash install-selfcode.sh [インストール先ディレクトリ]"
+      echo "使い方: sudo bash install-selfcode.sh [オプション] [インストール先ディレクトリ]"
+      echo "  -f, --force  ローカルの変更を破棄して強制的に最新版に更新する"
       exit 0
       ;;
     -y|--yes)
       # 確認なしで進める（このスクリプト自体に対話入力は無いため何もしない）
+      ;;
+    -f|--force)
+      FORCE=1
       ;;
     *) INSTALL_DIR="$arg" ;;
   esac
@@ -79,7 +84,12 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   warn "$INSTALL_DIR に既存のクローンがあります。最新版に更新します。"
   git -C "$INSTALL_DIR" fetch origin "$BRANCH"
   git -C "$INSTALL_DIR" checkout "$BRANCH"
-  git -C "$INSTALL_DIR" pull --ff-only origin "$BRANCH"
+  if [ "$FORCE" -eq 1 ]; then
+    warn "--force 指定のためローカルの変更を破棄して最新版に合わせます。"
+    git -C "$INSTALL_DIR" reset --hard "origin/$BRANCH"
+  else
+    git -C "$INSTALL_DIR" pull --ff-only origin "$BRANCH"
+  fi
 else
   maybe_sudo mkdir -p "$(dirname "$INSTALL_DIR")"
   maybe_sudo git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$INSTALL_DIR"

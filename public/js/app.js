@@ -1811,16 +1811,42 @@ const App = (() => {
   }
 
   // ---- selfcode アップデート ----
+  // ローカルの変更で pull が失敗した場合は、確認のうえ強制アップデート（reset --hard）で復旧できる
+  function isForceUpdatableError(e) {
+    if (!e) return false;
+    if (e.needForce || e.status === 409) return true;
+    return /would be overwritten|local changes|stash them|Your local changes/i.test(e.message || String(e));
+  }
+
   async function updateSelfcode() {
     if (updateRunning) return;
     if (!confirm("selfcode を最新版に更新しますか？\n完了まで数分かかることがあります。")) return;
     updateRunning = true;
     const ov = showUpdateOverlay();
     try {
-      await API.update();
+      await API.update(false);
       ov.done();
     } catch (e) {
-      ov.error(e.message || String(e));
+      if (isForceUpdatableError(e)) {
+        const ok = confirm(
+          "通常のアップデートに失敗しました（ローカルの変更が原因の可能性があります）。\n\n" +
+            (e.message || String(e)) +
+            "\n\nローカルの変更を破棄して強制的にアップデートしますか？"
+        );
+        if (ok) {
+          try {
+            ov.retryForce();
+            await API.update(true);
+            ov.done();
+          } catch (e2) {
+            ov.error(e2.message || String(e2));
+          }
+        } else {
+          ov.error(e.message || String(e));
+        }
+      } else {
+        ov.error(e.message || String(e));
+      }
     } finally {
       updateRunning = false;
     }
@@ -1861,6 +1887,13 @@ const App = (() => {
         msg.textContent = "アップデートが完了しました。「リスタート」ボタンを押してください。";
         restartBtn.classList.remove("hidden");
         closeBtn.classList.remove("hidden");
+      },
+      retryForce() {
+        spinner.classList.remove("hidden");
+        msg.classList.remove("err");
+        msg.textContent = "強制アップデート中…（ローカルの変更を破棄しています。完了まで数分かかることがあります）";
+        restartBtn.classList.add("hidden");
+        closeBtn.classList.add("hidden");
       },
       error(m) {
         spinner.classList.add("hidden");
