@@ -13,7 +13,7 @@
   <header id="topbar">
     <div class="brand">
       <span class="logo"><svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><text x="36" y="70" font-size="52" text-anchor="middle" fill="#fff" font-family="monospace" font-weight="bold">S</text><polyline points="58,40 80,54 58,68" fill="none" stroke="#d1d5db" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-      <span class="title-wrap"><span class="title">selfcode</span><span class="version">v.1.5.1</span></span>
+      <span class="title-wrap"><span class="title">selfcode</span><span class="version">v.1.6.0</span></span>
     </div>
     <button id="btn-explorer" class="btn toggle active" title="エクスプローラの表示切替"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>
     <button id="btn-refresh" class="btn" title="リフレッシュ"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
@@ -28,6 +28,7 @@
       <button id="btn-root" class="btn toggle" title="Root モード（ON で opencode/cline/freebuff/agy を root で実行）"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg><span>root</span></button>
       <button id="btn-opencode" class="btn toggle" title="opencode を分割ターミナルで起動">opencode</button>
       <button id="btn-cline" class="btn toggle" title="cline を分割ターミナルで起動">cline</button>
+      <button id="btn-aibridge" class="btn toggle" title="cline(PM)とopencode(実装)を連携させて自動進行">AI連携</button>
       <button id="btn-freebuff" class="btn toggle" title="freebuff チャットをターミナルで起動">freebuff</button>
       <button id="btn-ag" class="btn toggle" title="Antigravity CLI (agy) を分割ターミナルで起動">agy</button>
       <button id="btn-ssh-temp" class="btn toggle" title="agy の認証用に SSH のパスワード認証・root ログインを一時的に有効化（もう一度押すと解除）">一時SSH</button>
@@ -235,6 +236,33 @@
   </div>
 </div>
 
+<div id="aibridge-modal" class="modal hidden">
+  <div class="modal-box aibridge-box">
+    <div class="modal-head"><span>AI連携 — cline(PM) × opencode(実装)</span>
+      <button class="btn small" id="btn-aibridge-close" title="閉じる">×</button></div>
+    <div class="aibridge-body">
+      <div class="aibridge-status" id="aibridge-status">停止中</div>
+      <div class="gh-field">
+        <label for="aibridge-task">最初の指示（cline=PM に投げる内容）</label>
+        <textarea id="aibridge-task" class="aibridge-text" spellcheck="false" placeholder="例: TODOアプリに期限ソート機能を追加して。テストも通すこと。"></textarea>
+      </div>
+      <div class="gh-field">
+        <label for="aibridge-dir">作業ディレクトリ（ワークスペース内の相対パス。空=ルート）</label>
+        <input id="aibridge-dir" type="text" placeholder="例: workspace/myapp" autocomplete="off">
+      </div>
+      <label class="aibridge-check"><input type="checkbox" id="aibridge-autopermit" checked><span>許可を自動承認する（cline 自動承認 / opencode run --auto）</span></label>
+      <div class="gh-actions">
+        <button id="aibridge-start" class="btn small primary">連携開始（ターミナル1:cline / ターミナル2:opencode）</button>
+        <button id="aibridge-stop" class="btn small danger">停止</button>
+        <button id="aibridge-resend" class="btn small" title="現在のフェーズをもう一度実行する">現在のフェーズを再実行</button>
+        <button id="aibridge-diag" class="btn small" title="両ターミナルの出力末尾をログに表示する">ターミナルの状態を表示</button>
+      </div>
+      <div class="aibridge-hint">流れ: ①clineに指示→指示書(.ai-bridge/instruction.md)作成 ②opencodeが実装→完了報告(.ai-bridge/done.md) ③clineがレビュー→OKなら人間に通知。各AIはプロンプト付きで実行され、終了後に次の工程へ進みます。進まない場合は「ターミナルの状態を表示」で出力を確認してください。</div>
+      <div id="aibridge-log" class="aibridge-log"></div>
+    </div>
+  </div>
+</div>
+
 <script src="/xterm/xterm.js"></script>
 <script src="/xterm-fit/addon-fit.js"></script>
 <script src="/monaco/loader.js"></script>
@@ -242,5 +270,6 @@
 <script src="/js/chat.js"></script>
 <script src="/js/github.js"></script>
 <script src="/js/app.js"></script>
+<script src="/js/aibridge.js"></script>
 </body>
 </html>

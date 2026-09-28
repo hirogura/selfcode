@@ -114,6 +114,16 @@ const App = (() => {
     revealInExplorer: (p) => revealInExplorer(p || ""),
     // GitHub パネルの Term ボタン用: ターミナルで開き、エクスプローラもそのフォルダへ移動する
     openFolderAt: (p) => openFolderAt(p || ""),
+    // AI連携 (cline=PM × opencode=実装) 用のターミナル操作 API
+    termPanes: () => listBridgePanes(),
+    termActive: () => activeBridgePane(),
+    termEnsureBridge: (cwd, opts) => ensureBridgePanes(cwd, opts),
+    termSend: (id, text) => sendInputToPane(id, text),
+    termExecIn: (id, cmd, args) => execInPane(id, cmd, args),
+    termLog: (id, n) => paneLogTail(id, n),
+    termClearRoles: () => clearBridgeRoles(),
+    onTermData: (fn) => addTermDataListener(fn),
+    onTermExit: (fn) => addTermExitListener(fn),
   };
 
   async function openFile(path) {
@@ -634,6 +644,19 @@ const App = (() => {
 
   // ---- Terminal panes (分割対応) ----
   const termState = { root: null, focused: null, panes: new Map() };
+  // AI連携用: ターミナル出力のリスナー（許可検知・完了検知に使う）
+  const termDataListeners = new Set();
+  // AI連携用: プロセス終了のリスナー（非対話ランの完了検知に使う）
+  const termExitListeners = new Set();
+  const TERM_LOG_MAX = 200000;
+  function appendPaneLog(pane, data) {
+    if (!pane || typeof data !== "string" || !data) return;
+    pane.log = (pane.log || "") + data;
+    if (pane.log.length > TERM_LOG_MAX) pane.log = pane.log.slice(pane.log.length - TERM_LOG_MAX);
+    for (const fn of Array.from(termDataListeners)) {
+      try { fn(pane, data); } catch {}
+    }
+  }
 
   // ペインごとに安定した id を発行する（crypto.randomUUID は非セキュアコンテキストで使えないためフォールバック付き）
   function genPaneId() {
@@ -649,8 +672,9 @@ const App = (() => {
 
   function titleOf(pane) {
     const dir = displayDir(pane.cwd);
-    if (containerInfo) return "📦" + containerInfo.name + " — " + dir;
-    return (pane.user ? pane.user + "@" : "") + "bash — " + dir;
+    const roleTag = pane.role === "cline" ? "🤖PM " : pane.role === "opencode" ? "⚡DEV " : "";
+    if (containerInfo) return roleTag + "📦" + containerInfo.name + " — " + dir;
+    return roleTag + (pane.user ? pane.user + "@" : "") + "bash — " + dir;
   }
 
   function setPaneTitle(pane) {
@@ -677,6 +701,9 @@ const App = (() => {
       el: null,
       host: null,
       titleEl: null,
+      // AI連携用: 役割 ("cline" | "opencode" | null) と出力ログ
+      role: null,
+      log: "",
     };
     termState.panes.set(pane.id, pane);
     return pane;
@@ -853,7 +880,10 @@ const App = (() => {
       if (pane.closed || gen !== pane.wsGen) return;
       try {
         const msg = JSON.parse(e.data);
-        if (msg.type === "data") pane.term.write(msg.data);
+        if (msg.type === "data") {
+          appendPaneLog(pane, msg.data);
+          pane.term.write(msg.data);
+        }
         else if (msg.type === "state") {
           // 再接続時に実行中のコマンド（freebuff など）を復元する
           pane.running = !!msg.cmd;
@@ -864,6 +894,7 @@ const App = (() => {
           pane.running = false;
           pane.runningCmd = "";
           updateFreebuffBtn();
+          notifyTermExit(pane, msg.code);
         } else if (msg.type === "started") {
           pane.running = true;
           pane.runningCmd = msg.cmd || "";
@@ -1059,8 +1090,8 @@ const App = (() => {
     saveTermState();
   }
 
-  function execPane(pane, cmd) {
-    sendPane(pane, { type: "exec", cmd, cwd: pane.cwd, ...(rootMode ? { root: true } : {}) });
+  function execPane(pane, cmd, args) {
+    sendPane(pane, { type: "exec", cmd, cwd: pane.cwd, ...(Array.isArray(args) && args.length ? { args } : {}), ...(rootMode ? { root: true } : {}) });
   }
 
   const TERM_STATE_KEY = "selfcode.termPanes";
@@ -1072,7 +1103,7 @@ const App = (() => {
   function serializeTermState() {
     const ser = (node) => {
       if (!node) return null;
-      if (node.kind === "pane") return { k: "p", id: node.pane.id, cwd: node.pane.cwd, user: node.pane.user };
+      if (node.kind === "pane") return { k: "p", id: node.pane.id, cwd: node.pane.cwd, user: node.pane.user, role: node.pane.role || undefined };
       return { k: node.kind === "row" ? "r" : "c", ch: node.children.map(ser) };
     };
     return { root: ser(termState.root), focused: termState.focused ? termState.focused.id : null };
@@ -1121,6 +1152,7 @@ const App = (() => {
     const build = (d, parent) => {
       if (d.k === "p") {
         const pane = createPane(d.cwd || "", d.id, d.user);
+        if (d.role === "cline" || d.role === "opencode") pane.role = d.role;
         const node = paneNode(pane);
         pane.node = node;
         node.parent = parent;
@@ -1456,6 +1488,153 @@ const App = (() => {
 
   function openAgyAt(relPath) {
     openToolAt("agy", relPath);
+  }
+
+  // ---- AI連携用ブリッジ API ----
+  function listBridgePanes() {
+    return Array.from(termState.panes.values())
+      .filter((p) => !p.closed)
+      .map((p) => ({ id: p.id, cwd: p.cwd, role: p.role || null, running: !!p.running, runningCmd: p.runningCmd || "" }));
+  }
+
+  // 現在フォーカス中のターミナルペイン（cwd はホスト時はワークスペース相対、
+  // コンテナ選択時はコンテナ内相対パス）。AI連携モーダルの作業ディレクトリ初期値に使う。
+  function activeBridgePane() {
+    const p = activePane();
+    if (!p || p.closed) return null;
+    return { id: p.id, cwd: p.cwd || "", role: p.role || null };
+  }
+
+  function addTermDataListener(fn) {
+    if (typeof fn !== "function") return () => {};
+    termDataListeners.add(fn);
+    return () => termDataListeners.delete(fn);
+  }
+
+  function addTermExitListener(fn) {
+    if (typeof fn !== "function") return () => {};
+    termExitListeners.add(fn);
+    return () => termExitListeners.delete(fn);
+  }
+
+  function notifyTermExit(pane, code) {
+    for (const fn of Array.from(termExitListeners)) {
+      try { fn(pane, code); } catch {}
+    }
+  }
+
+  function paneLogTail(id, n) {
+    const p = termState.panes.get(id);
+    if (!p || p.closed) return "";
+    const log = p.log || "";
+    const max = Number(n) > 0 ? Number(n) : 8000;
+    return log.slice(-max);
+  }
+
+  function sendInputToPane(id, text) {
+    const p = termState.panes.get(id);
+    if (!p || p.closed) return false;
+    sendPane(p, { type: "input", data: String(text ?? "") });
+    return true;
+  }
+
+  function execInPane(id, cmd, args) {
+    const p = termState.panes.get(id);
+    if (!p || p.closed) return false;
+    execPane(p, cmd, args);
+    return true;
+  }
+
+  function clearBridgeRoles() {
+    for (const p of termState.panes.values()) {
+      if (p.role === "cline" || p.role === "opencode") p.role = null;
+    }
+    updateAllTitles();
+    saveTermState();
+  }
+
+  // AI連携用に cline(PM) / opencode(実装) の2ペインを用意する。
+  // 既存の役割ペインが生きていれば再利用し、無ければ分割して作成して各ツールを起動する。
+  // opts.launch === false の場合はペイン確保のみ行い、起動は呼び出し側（引数付きラン）に任せる。
+  function ensureBridgePanes(cwd, opts) {
+    const rel = String(cwd || "").replace(/^\/+/, "");
+    const launch = !opts || opts.launch !== false;
+    showTerminalPanel();
+    const findRole = (role) => {
+      for (const p of termState.panes.values()) {
+        if (!p.closed && p.role === role) return p;
+      }
+      return null;
+    };
+    const prepare = (role, cmd) => {
+      let pane = findRole(role);
+      if (pane) {
+        if (pane.cwd !== rel) {
+          pane.cwd = rel;
+          setPaneTitle(pane);
+        }
+        focusPane(pane);
+        if (launch && cmd && !pane.running) execPane(pane, cmd);
+        return pane;
+      }
+      let base = activePane() || firstPaneIn(termState.root);
+      if (!base) {
+        const np = createPane(rel);
+        const node = paneNode(np);
+        termState.root = node;
+        np.node = node;
+        buildPaneDom(np);
+        els.terminalWorkspace.appendChild(np.el);
+        openPaneTerminal(np);
+        base = np;
+      }
+      // 空きペイン（何も実行していない最初のペイン）があればそれを再利用し、無ければ分割する
+      if (!base.running && !base.role) {
+        pane = base;
+      } else {
+        splitPane(base); // 分割後は新しいペインがフォーカスされる
+        pane = activePane() || base;
+      }
+      if (!pane) return null;
+      pane.role = role;
+      pane.cwd = rel;
+      setPaneTitle(pane);
+      saveTermState();
+      focusPane(pane);
+      if (launch && cmd && !pane.running) execPane(pane, cmd);
+      return pane;
+    };
+    const clinePane = prepare("cline", "cline");
+    // opencode 側は cline と別ペインになるよう、cline を基準に分割する
+    let ocPane = findRole("opencode");
+    if (ocPane && ocPane !== clinePane) {
+      if (ocPane.cwd !== rel) {
+        ocPane.cwd = rel;
+        setPaneTitle(ocPane);
+      }
+      if (launch && !ocPane.running) execPane(ocPane, "opencode");
+    } else {
+      if (ocPane === clinePane) ocPane.role = null;
+      if (clinePane) {
+        splitPane(clinePane);
+        ocPane = activePane();
+      } else {
+        ocPane = null;
+      }
+      if (ocPane) {
+        ocPane.role = "opencode";
+        ocPane.cwd = rel;
+        setPaneTitle(ocPane);
+        saveTermState();
+        if (launch && !ocPane.running) execPane(ocPane, "opencode");
+      }
+    }
+    updateCloseButtons();
+    requestAnimationFrame(fitAll);
+    return {
+      cline: clinePane && !clinePane.closed ? clinePane.id : null,
+      opencode: ocPane && !ocPane.closed ? ocPane.id : null,
+    };
   }
 
   function clamp(v, min, max) {
@@ -1986,6 +2165,10 @@ const App = (() => {
     $("btn-cline").onclick = openClineTerminal;
     $("btn-opencode").onclick = openOpencodeTerminal;
     $("btn-ag").onclick = openAgTerminal;
+    $("btn-aibridge").onclick = () => {
+      if (window.AIBridge && typeof window.AIBridge.open === "function") window.AIBridge.open();
+      else toast("AI連携モジュールが読み込まれていません", true);
+    };
     $("btn-root").onclick = toggleRootMode;
     $("btn-ssh-temp").onclick = toggleSshTemp;
     // 「一時SSH」ボタンの状態を復元

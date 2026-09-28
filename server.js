@@ -325,7 +325,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "1.5.1",
+    version: "1.6.0",
     workspace: ROOT,
     distro: DISTRO,
     container: containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null,
@@ -2501,7 +2501,7 @@ wss.on("connection", (ws, req) => {
       if (msg.type === "input") t.write(msg.data);
       else if (msg.type === "resize") t.resize(Number(msg.cols) || 80, Number(msg.rows) || 24);
       else if (msg.type === "cwd") setTermCwd(msg.cwd).catch((e) => broadcast({ type: "data", data: "\r\n\x1b[31m[selfcode] " + e.message + "\x1b[0m\r\n" }));
-      else if (msg.type === "exec") execCmd(msg.cwd, msg.cmd, msg.root).catch((e) => broadcast({ type: "data", data: "\r\n\x1b[31m[selfcode] " + e.message + "\x1b[0m\r\n" }));
+      else if (msg.type === "exec") execCmd(msg.cwd, msg.cmd, msg.root, msg.args).catch((e) => broadcast({ type: "data", data: "\r\n\x1b[31m[selfcode] " + e.message + "\x1b[0m\r\n" }));
       else if (msg.type === "user") setTermUser(msg.user, msg.cwd).catch((e) => broadcast({ type: "data", data: "\r\n\x1b[31m[selfcode] " + e.message + "\x1b[0m\r\n" }));
       else if (msg.type === "kill") {
         // ペインを閉じるときの明示的な終了（切断だけではプロセスが残るため）
@@ -2625,9 +2625,12 @@ wss.on("connection", (ws, req) => {
     broadcast({ type: "data", data: TERM_WELCOME });
   }
 
-  async function execCmd(target, cmdRaw, forceRoot) {
+  async function execCmd(target, cmdRaw, forceRoot, argsRaw) {
     const cmd = String(cmdRaw || "freebuff");
     if (!/^[a-zA-Z0-9._/+-]+$/.test(cmd)) throw new Error("invalid command");
+    // AI連携などからプロンプトを引数付きで起動できるよう、引数はシェルクォートして渡す
+    const args = Array.isArray(argsRaw) ? argsRaw.map((a) => String(a ?? "")) : [];
+    const full = args.length ? cmd + " " + args.map(shq).join(" ") : cmd;
     if (containerCtx) {
       const dir = String(target || "");
       await runContainer(["sh", "-c", `test -d ${shq(dir || ".")}`], { timeoutMs: 10000 });
@@ -2646,7 +2649,7 @@ wss.on("connection", (ws, req) => {
           return;
         }
       }
-      spawnTermProc(dir, cmd, []);
+      spawnTermProc(dir, cmd, args);
       rec.cmd = cmd;
       broadcast({ type: "started", cmd, cwd: dir });
       return;
@@ -2668,7 +2671,7 @@ wss.on("connection", (ws, req) => {
     // シェル経由で起動して、シェルの初始化（profile 読み込み・PATH 設定）を行う。
     // これにより、opencode の内部シェルも正しく動作する。
     const userShell = process.env.SHELL || (fs.existsSync("/bin/bash") ? "/bin/bash" : "/bin/sh");
-    spawnTermProc(dir, userShell, ["-l", "-c", cmd], execUser);
+    spawnTermProc(dir, userShell, ["-l", "-c", full], execUser);
     rec.cmd = cmd;
     broadcast({ type: "started", cmd, cwd: dir });
   }
