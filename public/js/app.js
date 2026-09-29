@@ -1982,17 +1982,18 @@ const App = (() => {
 
   // ---- selfcode 再起動 ----
   async function restartSelfcode(skipConfirm) {
-    if (!skipConfirm && !confirm("selfcode を再起動しますか？\n未保存の変更は失われる場合があります。")) return;
+    if (!skipConfirm && !confirm("selfcode を再起動しますか？\n未保存の変更は失われる場合があります。")) return false;
     try {
       await API.restart();
     } catch (e) {
       // ステータス付きエラー = 再起動に失敗。接続断（タイムアウト等）は再起動開始とみなす
       if (e.status) {
         toast(e.message, true);
-        return;
+        return false;
       }
     }
     showRestartOverlay();
+    return true;
   }
 
   // ---- selfcode アップデート ----
@@ -2005,12 +2006,12 @@ const App = (() => {
 
   async function updateSelfcode() {
     if (updateRunning) return;
-    if (!confirm("selfcode を最新版に更新しますか？\n完了まで数分かかることがあります。")) return;
+    if (!confirm("selfcode を最新版に更新しますか？\n完了後に自動で再起動します（完了まで数分かかることがあります）。")) return;
     updateRunning = true;
     const ov = showUpdateOverlay();
     try {
       await API.update(false);
-      ov.done();
+      await autoRestartAfterUpdate(ov);
     } catch (e) {
       if (isForceUpdatableError(e)) {
         const ok = confirm(
@@ -2022,7 +2023,7 @@ const App = (() => {
           try {
             ov.retryForce();
             await API.update(true);
-            ov.done();
+            await autoRestartAfterUpdate(ov);
           } catch (e2) {
             ov.error(e2.message || String(e2));
           }
@@ -2034,6 +2035,19 @@ const App = (() => {
       }
     } finally {
       updateRunning = false;
+    }
+  }
+
+  // アップデート完了後は自動で再起動する。showRestartOverlay が
+  // サーバー復帰を待って自動リロード（リフレッシュ）する。
+  // 自動再起動に失敗したときだけ手動の「リスタート」ボタンを表示する。
+  async function autoRestartAfterUpdate(ov) {
+    ov.doneAuto();
+    await new Promise((r) => setTimeout(r, 1500));
+    hideUpdateOverlay();
+    const ok = await restartSelfcode(true);
+    if (!ok) {
+      showUpdateOverlay().done();
     }
   }
 
@@ -2072,6 +2086,12 @@ const App = (() => {
         msg.textContent = "アップデートが完了しました。「リスタート」ボタンを押してください。";
         restartBtn.classList.remove("hidden");
         closeBtn.classList.remove("hidden");
+      },
+      doneAuto() {
+        spinner.classList.add("hidden");
+        msg.textContent = "アップデートが完了しました。自動で再起動します…";
+        restartBtn.classList.add("hidden");
+        closeBtn.classList.add("hidden");
       },
       retryForce() {
         spinner.classList.remove("hidden");
