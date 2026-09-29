@@ -33,12 +33,21 @@ window.AIBridge = (() => {
     lastDone: null,
     lastReview: null,
     lastFix: null,
+    lastLimitRetry: 0,
+    limitNotified: false,
   };
 
   const normDir = (d) => String(d || "").trim().replace(/^\/+|\/+$/g, "");
   const bp = (name) => (S.dir ? S.dir + "/" + BRIDGE + "/" + name : BRIDGE + "/" + name);
   const autoApprove = () => ($("aibridge-autopermit") ? $("aibridge-autopermit").checked : true);
+  const autoResume = () => ($("aibridge-autoresume") ? $("aibridge-autoresume").checked : true);
   const VIS_KEY = "selfcode.aibridgeVisible";
+  const RESUME_KEY = "selfcode.aibridge.autoresume";
+  // opencode の使用制限に達したときの出力パターン（レートリミット / セッションリミット等）。
+  // 429 や quota 系の文言を広めに検知する（ターミナル出力の末尾に対して判定する）。
+  const LIMIT_RE = /rate[\s_\-]*limit|session[\s_\-]*limit|usage[\s_\-]*limit|too many requests|\b429\b|quota|retry after|try again later|limit (reached|exceeded|hit)|reached.{0,20}limit|exceeded.{0,20}quota|セッション.{0,10}リミット|レートリミット|使用制限|利用制限/i;
+  // リミット回復待ちの再実行間隔（短すぎると制限を悪化させるため最低60秒空ける）
+  const LIMIT_RETRY_MS = 60 * 1000;
 
   function toast(msg, isErr) {
     let t = $("toast");
@@ -133,7 +142,50 @@ window.AIBridge = (() => {
     S.failNotified = false;
     S.runExited = false;
     S.exitCode = null;
+    S.limitNotified = false;
     if (statusText) setStatus(statusText, true);
+  }
+
+  function isLimitHit(text) {
+    return LIMIT_RE.test(String(text || ""));
+  }
+
+  // opencode フェーズで使用制限（レート/セッションリミット）を検知したら、
+  // 設定に応じて自動再開する。true を返したら通常の失敗通知はスキップする。
+  function limitCheck(label, paneId, rerun) {
+    const tail = paneTail(paneId, 5000);
+    if (!isLimitHit(tail)) return false;
+    if (!autoResume()) {
+      if (!S.limitNotified) {
+        S.limitNotified = true;
+        log(`${label} が使用制限に達したようです（自動再開OFF）。回復後に「再実行」を押してください。`);
+        notifyHuman(`AI連携: ${label} が使用制限に達しました`, tail.slice(-300) || "回復後に再実行してください");
+      }
+      return true;
+    }
+    // 自動再開ON: 実行中なら回復待ち（重複起動しない）、終了済みなら間隔を空けて再実行
+    if (S.runExited) {
+      const now = Date.now();
+      if (now - S.lastLimitRetry >= LIMIT_RETRY_MS) {
+        S.lastLimitRetry = now;
+        S.runExited = false;
+        S.failNotified = false;
+        S.limitNotified = false;
+        S.phaseSince = now;
+        log(`${label} が使用制限に達したため、自動で再開します。`);
+        setStatus("連携中: opencode リミット回復待ち・自動再開…", true);
+        rerun();
+      } else {
+        setStatus("連携中: opencode リミット回復待ち・自動再開…", true);
+      }
+    } else {
+      if (!S.limitNotified) {
+        S.limitNotified = true;
+        log(`${label} が使用制限に達したようです。回復を待っています（自動再開ON）。`);
+      }
+      setStatus("連携中: opencode リミット回復待ち…", true);
+    }
+    return true;
   }
 
   // ---- 各フェーズの非対話ラン ----
@@ -252,6 +304,9 @@ window.AIBridge = (() => {
           setPhase("wait-review", "連携中: cline がレビュー中…");
           return;
         }
+        if (limitCheck("opencode", S.opencodeId, () =>
+          runOpencodeDev(S.lastFix || S.lastInstruction || "")
+        )) return;
         stallOrFailCheck("opencode", S.opencodeId, bp("done.md"), () =>
           runOpencodeDev(S.lastFix || S.lastInstruction || "")
         );
@@ -365,8 +420,10 @@ window.AIBridge = (() => {
     S.running = true;
     S.lastInstruction = S.lastDone = S.lastReview = S.lastFix = null;
     S.currentRun = null;
+    S.lastLimitRetry = 0;
+    S.limitNotified = false;
     setPhase("wait-instruction", "連携中: cline(PM) が指示書を作成中…");
-    log(`連携開始（作業: ${S.dir || "/"} / ターミナル1:cline PM / ターミナル2:opencode 実装 / 自動承認:${autoApprove() ? "ON" : "OFF"}）`);
+    log(`連携開始（作業: ${S.dir || "/"} / ターミナル1:cline PM / ターミナル2:opencode 実装 / 自動承認:${autoApprove() ? "ON" : "OFF"} / リミット後自動再開:${autoResume() ? "ON" : "OFF"}）`);
 
     if (S.exitUnsub) { try { S.exitUnsub(); } catch {} S.exitUnsub = null; }
     if (window.App.onTermExit) S.exitUnsub = window.App.onTermExit(onExit);
@@ -394,6 +451,7 @@ window.AIBridge = (() => {
     }
     S.runExited = false;
     S.failNotified = false;
+    S.limitNotified = false;
     S.phaseSince = Date.now();
     if (S.phase === "wait-instruction") {
       log("現在のフェーズ（cline:指示書作成）を再実行します。");
@@ -483,6 +541,16 @@ window.AIBridge = (() => {
     const dirInput = $("aibridge-dir");
     if (dirInput) dirInput.addEventListener("change", () => {
       try { localStorage.setItem("selfcode.aibridge.dir", dirInput.value); } catch {}
+    });
+    // リミット後自動再開チェックボックスの状態を保持する（デフォルトはON）
+    try {
+      const savedResume = localStorage.getItem(RESUME_KEY);
+      if ($("aibridge-autoresume") && savedResume !== null) $("aibridge-autoresume").checked = savedResume !== "0";
+    } catch {}
+    const resumeInput = $("aibridge-autoresume");
+    if (resumeInput) resumeInput.addEventListener("change", () => {
+      try { localStorage.setItem(RESUME_KEY, resumeInput.checked ? "1" : "0"); } catch {}
+      log(`リミット後の自動再開を${resumeInput.checked ? "ON" : "OFF"}にしました。`);
     });
     try {
       if (localStorage.getItem(VIS_KEY) === "1") show();
