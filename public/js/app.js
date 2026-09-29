@@ -1983,37 +1983,64 @@ const App = (() => {
   // ---- selfcode 再起動 ----
   async function restartSelfcode(skipConfirm) {
     if (!skipConfirm && !confirm("selfcode を再起動しますか？\n未保存の変更は失われる場合があります。")) return false;
+    // 再起動の完了は bootId/version の変化で判定する（停止時間は1秒程度と短く、
+    // 「応答が止まったか」だけでは再起動の前後を見逃すため）。
+    let beforeBoot = null;
+    let beforeVer = null;
+    try {
+      const st = await API.status();
+      if (st) {
+        beforeBoot = st.bootId || null;
+        beforeVer = st.version || null;
+      }
+    } catch {}
+    let restartErr = null;
     try {
       await API.restart();
     } catch (e) {
-      // 接続断（タイムアウト等）は再起動開始とみなす。
-      // ステータス付きエラーでも、直後にサーバーが停止すれば再起動は進行中
-      // （systemctl クライアントの終了が実際の停止より先に起き、500 が先に届くレースがあるため）。
-      // サーバーが応答しなくなるか確認してから成否を判定する。
-      if (e.status) {
-        const restarting = await waitServerGone(8000);
-        if (!restarting) {
-          toast(e.message, true);
-          return false;
-        }
+      // 接続断 = サーバー停止 = 再起動が進行中（復帰待ちはオーバーレイが行う）。
+      // ステータス付きエラーは確定失敗とは限らないので bootId 確認に進む。
+      if (!e.status) {
+        showRestartOverlay();
+        return true;
       }
+      restartErr = e;
+    }
+    const restarted = await waitServerRestarted(beforeBoot, beforeVer, 30000);
+    if (!restarted) {
+      toast((restartErr && restartErr.message) || "再起動に失敗しました", true);
+      return false;
     }
     showRestartOverlay();
     return true;
   }
 
-  // 指定ミリ秒以内にサーバーが応答しなくなれば true（再起動が進行中）。
-  // ずっと応答があれば false（再起動していない＝確定失敗）。
-  async function waitServerGone(timeoutMs) {
+  // サーバーの置き換わり（再起動の完了）または停止中（再起動の進行中）を待つ。
+  // bootId か version のどちらかが変われば再起動済み。接続断も進行中とみなす。
+  // ずっと同一サーバーが応答し続ければ false（再起動していない＝確定失敗）。
+  async function waitServerRestarted(beforeBoot, beforeVer, timeoutMs) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       try {
         const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 2000);
-        await fetch("/api/status", { cache: "no-store", signal: ctrl.signal });
+        const t = setTimeout(() => ctrl.abort(), 3000);
+        const r = await fetch("/api/status", { cache: "no-store", signal: ctrl.signal });
         clearTimeout(t);
+        if (r.ok) {
+          let boot = null;
+          let ver = null;
+          try {
+            const d = await r.json();
+            boot = (d && d.bootId) || null;
+            ver = (d && d.version) || null;
+          } catch {}
+          if ((beforeBoot && boot && boot !== beforeBoot) || (beforeVer && ver && ver !== beforeVer)) {
+            return true; // 新プロセスに置き換わった
+          }
+          // 同一サーバーが応答中 → まだ再起動していない。待機を続ける
+        }
       } catch {
-        return true; // 接続断 = サーバー停止 = 再起動が進行中
+        return true; // 接続断 = 停止中 = 再起動が進行中（復帰待ちはオーバーレイが行う）
       }
       await new Promise((r) => setTimeout(r, 500));
     }

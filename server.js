@@ -124,6 +124,10 @@ app.use((req, res, next) => {
 
 const oc = { port: null, password: OC_PASS, ready: false, child: null, version: null, manualStop: false };
 
+// プロセス起動ごとに変わる識別子。クライアントが再起動の完了（新プロセスへの置き換わり）を
+// 検知するために /api/status で返す（単なる死活では短い再起動を見逃すため）。
+const BOOT_ID = Date.now().toString(36) + "-" + process.pid + "-" + crypto.randomBytes(4).toString("hex");
+
 function findFreePort() {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
@@ -325,7 +329,8 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "1.9.1",
+    version: "1.9.2",
+    bootId: BOOT_ID,
     workspace: ROOT,
     distro: DISTRO,
     container: containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null,
@@ -2349,11 +2354,11 @@ app.post("/api/container/exit", (req, res) => {
 });
 
 // 再起動: systemd サービスを再起動する。成功時は自分のプロセスが systemctl に停止されるため
-// 応答は返らずクライアント側の接続断が「再起動開始」の合図になる。失敗時のみエラーを返す。
+// クライアントは接続断または { ok: true } を「再起動開始」の合図にし、
+// /api/status の bootId/version の変化で再起動の完了を確認する。
 // 注意: systemctl クライアントの終了は実際の停止より先に起きることがあるため、
-// close 直後に 500 を返すと「再起動は進んでいるのに失敗応答が届く」レースになる。
-// そのため close 時の 500 応答は少し遅らせる（この間に SIGTERM で停止すれば何も送られない）。
-// spawn 自体の失敗（error）は再起動が起きない確定なので即時 500 を返す。
+// close 時の成否応答がレースで先に届いても、クライアント側の bootId 確認で正しく判定できる。
+// spawn 自体の失敗（error）と非ゼロ終了（close code !== 0）は再起動が起きない確定なので即時 500 を返す。
 app.post("/api/restart", (req, res) => {
   console.log("[selfcode] restart requested: " + RESTART_CMD);
   const child = spawn(RESTART_CMD, { shell: true, stdio: ["ignore", "pipe", "pipe"] });
@@ -2364,10 +2369,12 @@ app.post("/api/restart", (req, res) => {
     if (!res.headersSent) res.status(500).json({ error: "再起動コマンドを実行できませんでした: " + e.message });
   });
   child.on("close", (code) => {
-    // ここまで生き残っている = 再起動に失敗（成功時は systemctl が自分のプロセスを停止する）
-    setTimeout(() => {
-      if (!res.headersSent) res.status(500).json({ error: "再起動に失敗しました (exit " + code + "): " + out.trim() });
-    }, 3000);
+    if (res.headersSent) return;
+    // 非ゼロ終了 = ジョブ投入に失敗（停止は起きない確定）→ 即時 500。
+    // 終了コード 0 = 再起動ジョブ投入済み → 200 で応答（直後に SIGTERM で停止する。
+    // 応答書き込み中に停止した場合はクライアント側で接続断になるが、それも正常系として扱う）。
+    if (code !== 0) res.status(500).json({ error: "再起動に失敗しました (exit " + code + "): " + out.trim() });
+    else res.json({ ok: true });
   });
 });
 
