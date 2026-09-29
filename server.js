@@ -325,7 +325,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "1.9.0",
+    version: "1.9.1",
     workspace: ROOT,
     distro: DISTRO,
     container: containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null,
@@ -2350,6 +2350,10 @@ app.post("/api/container/exit", (req, res) => {
 
 // 再起動: systemd サービスを再起動する。成功時は自分のプロセスが systemctl に停止されるため
 // 応答は返らずクライアント側の接続断が「再起動開始」の合図になる。失敗時のみエラーを返す。
+// 注意: systemctl クライアントの終了は実際の停止より先に起きることがあるため、
+// close 直後に 500 を返すと「再起動は進んでいるのに失敗応答が届く」レースになる。
+// そのため close 時の 500 応答は少し遅らせる（この間に SIGTERM で停止すれば何も送られない）。
+// spawn 自体の失敗（error）は再起動が起きない確定なので即時 500 を返す。
 app.post("/api/restart", (req, res) => {
   console.log("[selfcode] restart requested: " + RESTART_CMD);
   const child = spawn(RESTART_CMD, { shell: true, stdio: ["ignore", "pipe", "pipe"] });
@@ -2361,7 +2365,9 @@ app.post("/api/restart", (req, res) => {
   });
   child.on("close", (code) => {
     // ここまで生き残っている = 再起動に失敗（成功時は systemctl が自分のプロセスを停止する）
-    if (!res.headersSent) res.status(500).json({ error: "再起動に失敗しました (exit " + code + "): " + out.trim() });
+    setTimeout(() => {
+      if (!res.headersSent) res.status(500).json({ error: "再起動に失敗しました (exit " + code + "): " + out.trim() });
+    }, 3000);
   });
 });
 

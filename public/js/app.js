@@ -1986,14 +1986,38 @@ const App = (() => {
     try {
       await API.restart();
     } catch (e) {
-      // ステータス付きエラー = 再起動に失敗。接続断（タイムアウト等）は再起動開始とみなす
+      // 接続断（タイムアウト等）は再起動開始とみなす。
+      // ステータス付きエラーでも、直後にサーバーが停止すれば再起動は進行中
+      // （systemctl クライアントの終了が実際の停止より先に起き、500 が先に届くレースがあるため）。
+      // サーバーが応答しなくなるか確認してから成否を判定する。
       if (e.status) {
-        toast(e.message, true);
-        return false;
+        const restarting = await waitServerGone(8000);
+        if (!restarting) {
+          toast(e.message, true);
+          return false;
+        }
       }
     }
     showRestartOverlay();
     return true;
+  }
+
+  // 指定ミリ秒以内にサーバーが応答しなくなれば true（再起動が進行中）。
+  // ずっと応答があれば false（再起動していない＝確定失敗）。
+  async function waitServerGone(timeoutMs) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 2000);
+        await fetch("/api/status", { cache: "no-store", signal: ctrl.signal });
+        clearTimeout(t);
+      } catch {
+        return true; // 接続断 = サーバー停止 = 再起動が進行中
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    return false;
   }
 
   // ---- selfcode アップデート ----
