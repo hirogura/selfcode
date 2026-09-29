@@ -14,6 +14,7 @@ const App = (() => {
     chat: $("chat"),
     chatContent: $("chat-content"),
     github: $("github"),
+    aibridge: $("aibridge"),
     status: $("oc-status"),
     memo: $("memo"),
     memoInput: $("memo-input"),
@@ -1686,6 +1687,10 @@ const App = (() => {
       } else if (state.mode === "github") {
         const w = clamp(state.startW + (state.startX - e.clientX), 280, layout.clientWidth * 0.6);
         els.github.style.width = w + "px";
+      } else if (state.mode === "aibridge") {
+        const w = clamp(state.startW + (state.startX - e.clientX), 280, layout.clientWidth * 0.6);
+        const panel = $("aibridge");
+        if (panel) panel.style.width = w + "px";
       } else if (state.mode === "terminal") {
         const h = clamp(state.startH + (state.startY - e.clientY), TERM_H_MIN, termMaxH());
         els.terminal.style.height = h + "px";
@@ -1723,6 +1728,7 @@ const App = (() => {
     // pointer イベントを使うことでマウスとタッチ（iPad など）の両方でドラッグできる
     $("divider-sidebar").addEventListener("pointerdown", (e) => begin(e, "sidebar", els.sidebar));
     $("divider-github").addEventListener("pointerdown", (e) => begin(e, "github", els.github));
+    $("divider-aibridge").addEventListener("pointerdown", (e) => begin(e, "aibridge", $("aibridge")));
     $("divider-chat").addEventListener("pointerdown", (e) => begin(e, "chat", els.chat));
     $("divider-terminal").addEventListener("pointerdown", (e) => begin(e, "terminal", els.terminal));
     $("divider-memo").addEventListener("pointerdown", (e) => begin(e, "memo", els.memo));
@@ -2166,7 +2172,8 @@ const App = (() => {
     $("btn-opencode").onclick = openOpencodeTerminal;
     $("btn-ag").onclick = openAgTerminal;
     $("btn-aibridge").onclick = () => {
-      if (window.AIBridge && typeof window.AIBridge.open === "function") window.AIBridge.open();
+      if (window.AIBridge && typeof window.AIBridge.toggle === "function") window.AIBridge.toggle();
+      else if (window.AIBridge && typeof window.AIBridge.open === "function") window.AIBridge.open();
       else toast("AI連携モジュールが読み込まれていません", true);
     };
     $("btn-root").onclick = toggleRootMode;

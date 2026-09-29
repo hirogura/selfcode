@@ -13,7 +13,7 @@
   <header id="topbar">
     <div class="brand">
       <span class="logo"><svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><text x="36" y="70" font-size="52" text-anchor="middle" fill="#fff" font-family="monospace" font-weight="bold">S</text><polyline points="58,40 80,54 58,68" fill="none" stroke="#d1d5db" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-      <span class="title-wrap"><span class="title">selfcode</span><span class="version">v.1.6.0</span></span>
+      <span class="title-wrap"><span class="title">selfcode</span><span class="version">v.1.7.0</span></span>
     </div>
     <button id="btn-explorer" class="btn toggle active" title="エクスプローラの表示切替"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>
     <button id="btn-refresh" class="btn" title="リフレッシュ"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
@@ -24,7 +24,6 @@
       <button id="btn-editor" class="btn toggle active" title="エディタの表示切替"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><span>エディタ</span></button>
       <span class="divider"></span>
       <button id="btn-terminal" class="btn toggle" title="ターミナルの表示切替 (Ctrl+J)"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg><span>ターミナル</span></button>
-      <button id="btn-github" class="btn toggle" title="GitHub パネル（連携設定・リポジトリ操作）"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg><span>GitHub</span></button>
       <button id="btn-root" class="btn toggle" title="Root モード（ON で opencode/cline/freebuff/agy を root で実行）"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg><span>root</span></button>
       <button id="btn-opencode" class="btn toggle" title="opencode を分割ターミナルで起動">opencode</button>
       <button id="btn-cline" class="btn toggle" title="cline を分割ターミナルで起動">cline</button>
@@ -32,6 +31,7 @@
       <button id="btn-freebuff" class="btn toggle" title="freebuff チャットをターミナルで起動">freebuff</button>
       <button id="btn-ag" class="btn toggle" title="Antigravity CLI (agy) を分割ターミナルで起動">agy</button>
       <button id="btn-ssh-temp" class="btn toggle" title="agy の認証用に SSH のパスワード認証・root ログインを一時的に有効化（もう一度押すと解除）">一時SSH</button>
+      <button id="btn-github" class="btn toggle" title="GitHub パネル（連携設定・リポジトリ操作）"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg><span>GitHub</span></button>
       <button id="btn-memo" class="btn toggle" title="メモの表示切替"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11l5-5V5a2 2 0 0 0-2-2Z"/><path d="M14 3v4a2 2 0 0 0 2 2h4"/><line x1="8" y1="13" x2="12" y2="13"/><line x1="8" y1="17" x2="12" y2="17"/></svg><span>メモ</span></button>
       <button id="btn-chat" class="btn toggle" title="opencode チャットの表示切替 (Ctrl+B)"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg><span>チャット</span></button>
       <span class="divider"></span>
@@ -83,6 +83,36 @@
         <div id="terminal-workspace"></div>
       </div>
     </main>
+
+    <div class="divider-v hidden" id="divider-aibridge" title="ドラッグで幅を調整"></div>
+    <aside id="aibridge" class="aibridge hidden">
+      <div class="aibridge-head">
+        <span>AI連携 <span class="hint">cline(PM) × opencode(実装)</span></span>
+        <div class="aibridge-head-actions">
+          <button id="btn-aibridge-close" class="btn small" title="閉じる">×</button>
+        </div>
+      </div>
+      <div class="aibridge-body">
+        <div class="aibridge-status" id="aibridge-status">停止中</div>
+        <div class="gh-field">
+          <label for="aibridge-task">最初の指示（cline=PM に投げる内容）</label>
+          <textarea id="aibridge-task" class="aibridge-text" spellcheck="false" placeholder="例: TODOアプリに期限ソート機能を追加して。テストも通すこと。"></textarea>
+        </div>
+        <div class="gh-field">
+          <label for="aibridge-dir">作業ディレクトリ（ワークスペース内の相対パス。空=ルート）</label>
+          <input id="aibridge-dir" type="text" placeholder="例: workspace/myapp" autocomplete="off">
+        </div>
+        <label class="aibridge-check"><input type="checkbox" id="aibridge-autopermit" checked><span>許可を自動承認する（cline 自動承認 / opencode run --auto）</span></label>
+        <div class="gh-actions">
+          <button id="aibridge-start" class="btn small primary">連携開始</button>
+          <button id="aibridge-stop" class="btn small danger">停止</button>
+          <button id="aibridge-resend" class="btn small" title="現在のフェーズをもう一度実行する">再実行</button>
+          <button id="aibridge-diag" class="btn small" title="両ターミナルの出力末尾をログに表示する">状態表示</button>
+        </div>
+        <div class="aibridge-hint">流れ: ①clineに指示→指示書(.ai-bridge/instruction.md)作成 ②opencodeが実装→完了報告(.ai-bridge/done.md) ③clineがレビュー→OKなら人間に通知。各AIはプロンプト付きで実行され、終了後に次の工程へ進みます。進まない場合は「状態表示」で出力を確認してください。</div>
+        <div id="aibridge-log" class="aibridge-log"></div>
+      </div>
+    </aside>
 
     <div class="divider-v hidden" id="divider-github" title="ドラッグで幅を調整"></div>
     <aside id="github" class="github hidden">
@@ -233,33 +263,6 @@
         </div>
       </div>
     </aside>
-  </div>
-</div>
-
-<div id="aibridge-modal" class="modal hidden">
-  <div class="modal-box aibridge-box">
-    <div class="modal-head"><span>AI連携 — cline(PM) × opencode(実装)</span>
-      <button class="btn small" id="btn-aibridge-close" title="閉じる">×</button></div>
-    <div class="aibridge-body">
-      <div class="aibridge-status" id="aibridge-status">停止中</div>
-      <div class="gh-field">
-        <label for="aibridge-task">最初の指示（cline=PM に投げる内容）</label>
-        <textarea id="aibridge-task" class="aibridge-text" spellcheck="false" placeholder="例: TODOアプリに期限ソート機能を追加して。テストも通すこと。"></textarea>
-      </div>
-      <div class="gh-field">
-        <label for="aibridge-dir">作業ディレクトリ（ワークスペース内の相対パス。空=ルート）</label>
-        <input id="aibridge-dir" type="text" placeholder="例: workspace/myapp" autocomplete="off">
-      </div>
-      <label class="aibridge-check"><input type="checkbox" id="aibridge-autopermit" checked><span>許可を自動承認する（cline 自動承認 / opencode run --auto）</span></label>
-      <div class="gh-actions">
-        <button id="aibridge-start" class="btn small primary">連携開始（ターミナル1:cline / ターミナル2:opencode）</button>
-        <button id="aibridge-stop" class="btn small danger">停止</button>
-        <button id="aibridge-resend" class="btn small" title="現在のフェーズをもう一度実行する">現在のフェーズを再実行</button>
-        <button id="aibridge-diag" class="btn small" title="両ターミナルの出力末尾をログに表示する">ターミナルの状態を表示</button>
-      </div>
-      <div class="aibridge-hint">流れ: ①clineに指示→指示書(.ai-bridge/instruction.md)作成 ②opencodeが実装→完了報告(.ai-bridge/done.md) ③clineがレビュー→OKなら人間に通知。各AIはプロンプト付きで実行され、終了後に次の工程へ進みます。進まない場合は「ターミナルの状態を表示」で出力を確認してください。</div>
-      <div id="aibridge-log" class="aibridge-log"></div>
-    </div>
   </div>
 </div>
 

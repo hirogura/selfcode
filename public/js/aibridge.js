@@ -38,6 +38,7 @@ window.AIBridge = (() => {
   const normDir = (d) => String(d || "").trim().replace(/^\/+|\/+$/g, "");
   const bp = (name) => (S.dir ? S.dir + "/" + BRIDGE + "/" + name : BRIDGE + "/" + name);
   const autoApprove = () => ($("aibridge-autopermit") ? $("aibridge-autopermit").checked : true);
+  const VIS_KEY = "selfcode.aibridgeVisible";
 
   function toast(msg, isErr) {
     let t = $("toast");
@@ -71,7 +72,13 @@ window.AIBridge = (() => {
       el.classList.toggle("on", !!active);
     }
     const btn = $("btn-aibridge");
-    if (btn) btn.classList.toggle("active", !!active);
+    // ボタン表示は「パネル表示中」または「連携実行中」の OR。作業中もターミナルが見えるようパネル化したため。
+    if (btn) btn.classList.toggle("active", !!active || visible());
+  }
+
+  function visible() {
+    const el = $("aibridge");
+    return !!el && !el.classList.contains("hidden");
   }
 
   function notifyHuman(title, body) {
@@ -410,31 +417,57 @@ window.AIBridge = (() => {
   }
 
   function open() {
-    const m = $("aibridge-modal");
-    if (!m) return;
+    show();
+  }
+
+  function close() {
+    hide();
+  }
+
+  function toggle() {
+    if (visible()) hide();
+    else show();
+  }
+
+  function show() {
+    const panel = $("aibridge");
+    const div = $("divider-aibridge");
+    if (!panel) return;
     // 現在のターミナルの場所を作業ディレクトリの初期値にする。
     // cwd はホスト時はワークスペース相対、コンテナ選択時はコンテナ内相対パスなのでそのまま使える。
     try {
       const cur = window.App.termActive ? window.App.termActive() : null;
       const dirInput = $("aibridge-dir");
-      if (cur && dirInput) {
-        dirInput.value = cur.cwd || "";
-        try { localStorage.setItem("selfcode.aibridge.dir", dirInput.value); } catch {}
+      if (cur && dirInput && !dirInput.value) {
+        try {
+          const saved = localStorage.getItem("selfcode.aibridge.dir");
+          dirInput.value = cur.cwd || saved || "";
+        } catch {
+          dirInput.value = cur.cwd || "";
+        }
       }
     } catch {}
-    m.classList.remove("hidden");
+    panel.classList.remove("hidden");
+    if (div) div.classList.remove("hidden");
+    const btn = $("btn-aibridge");
+    if (btn) btn.classList.add("active");
+    try { localStorage.setItem(VIS_KEY, "1"); } catch {}
   }
 
-  function close() {
-    const m = $("aibridge-modal");
-    if (m) m.classList.add("hidden");
+  function hide() {
+    const panel = $("aibridge");
+    const div = $("divider-aibridge");
+    if (panel) panel.classList.add("hidden");
+    if (div) div.classList.add("hidden");
+    const btn = $("btn-aibridge");
+    // 実行中はボタン点灯を維持する
+    if (btn) btn.classList.toggle("active", !!S.running);
+    try { localStorage.setItem(VIS_KEY, "0"); } catch {}
   }
 
   document.addEventListener("DOMContentLoaded", () => {
     const btnClose = $("btn-aibridge-close");
-    if (btnClose) btnClose.onclick = close;
-    const m = $("aibridge-modal");
-    if (m) m.addEventListener("mousedown", (e) => { if (e.target === m) close(); });
+    if (btnClose) btnClose.onclick = hide;
     const btnStart = $("aibridge-start");
     if (btnStart) btnStart.onclick = () => { start().catch((e) => toast(e.message || String(e), true)); };
     const btnStop = $("aibridge-stop");
@@ -443,21 +476,18 @@ window.AIBridge = (() => {
     if (btnResend) btnResend.onclick = resend;
     const btnDiag = $("aibridge-diag");
     if (btnDiag) btnDiag.onclick = diag;
-    const modal = $("aibridge-modal");
-    if (modal) {
-      try {
-        const saved = localStorage.getItem("selfcode.aibridge.dir");
-        if (saved && $("aibridge-dir") && !$("aibridge-dir").value) $("aibridge-dir").value = saved;
-      } catch {}
-      const dirInput = $("aibridge-dir");
-      if (dirInput) dirInput.addEventListener("change", () => {
-        try { localStorage.setItem("selfcode.aibridge.dir", dirInput.value); } catch {}
-      });
-    }
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") close();
+    try {
+      const saved = localStorage.getItem("selfcode.aibridge.dir");
+      if (saved && $("aibridge-dir") && !$("aibridge-dir").value) $("aibridge-dir").value = saved;
+    } catch {}
+    const dirInput = $("aibridge-dir");
+    if (dirInput) dirInput.addEventListener("change", () => {
+      try { localStorage.setItem("selfcode.aibridge.dir", dirInput.value); } catch {}
     });
+    try {
+      if (localStorage.getItem(VIS_KEY) === "1") show();
+    } catch {}
   });
 
-  return { open, close, start, stop, resend, diag };
+  return { open, close, show, hide, toggle, start, stop, resend, diag };
 })();

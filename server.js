@@ -325,7 +325,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "1.6.0",
+    version: "1.7.0",
     workspace: ROOT,
     distro: DISTRO,
     container: containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null,
@@ -1842,6 +1842,24 @@ const DEFAULT_GITIGNORE_TEMPLATE = [
   "*.key",
   "*.p12",
   "*.pfx",
+  "",
+  ".ai-bridge/",
+  "",
+  "node_modules/",
+  "dist/",
+  "build/",
+  ".next/",
+  "out/",
+  "coverage/",
+  "",
+  ".venv/",
+  "__pycache__/",
+  "*.pyc",
+  "",
+  ".idea/",
+  ".vscode/",
+  "*.swp",
+  "*~",
   "",
 ].join("\n");
 
