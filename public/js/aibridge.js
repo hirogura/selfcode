@@ -23,7 +23,7 @@ window.AIBridge = (() => {
     opencodeId: null,
     pollTimer: null,
     exitUnsub: null,
-    currentRun: null, // { pane: "cline"|"opencode", kind: "pm"|"dev"|"review"|"fix" }
+    currentRun: null, // { pane: "cline"|"opencode", kind: "pm"|"dev"|"review"|"fix"|"troubleshoot" }
     runExited: false,
     exitCode: null,
     phaseSince: 0,
@@ -35,6 +35,11 @@ window.AIBridge = (() => {
     lastFix: null,
     lastLimitRetry: 0,
     limitNotified: false,
+    // 成果物なし終了時の相互リカバリー用
+    recovering: false, // もう1つのAIにトラブル解決を問いかけ中
+    recoverFor: null, // "instruction" | "done" | "review"
+    recoverAttempts: 0, // 現フェーズでのリカバリー試行回数
+    lastTrouble: null,
   };
 
   const normDir = (d) => String(d || "").trim().replace(/^\/+|\/+$/g, "");
@@ -48,6 +53,13 @@ window.AIBridge = (() => {
   const LIMIT_RE = /rate[\s_\-]*limit|session[\s_\-]*limit|usage[\s_\-]*limit|too many requests|\b429\b|quota|retry after|try again later|limit (reached|exceeded|hit)|reached.{0,20}limit|exceeded.{0,20}quota|セッション.{0,10}リミット|レートリミット|使用制限|利用制限/i;
   // リミット回復待ちの再実行間隔（短すぎると制限を悪化させるため最低60秒空ける）
   const LIMIT_RETRY_MS = 60 * 1000;
+  // 成果物なし終了時に、もう1つのAIへトラブル解決を依頼する上限（無限ループ防止）
+  const MAX_RECOVER = 2;
+  // どうしても人間の確認・返答が必要そうな出力パターン（権限・認証・曖昧な指示への質問など）。
+  // これに当たったら自動再実行せず、人間にターミナルでの返答を促す。
+  const HUMAN_RE = /approve|permission|allow\?|confirm|confirmation|human.*(confirm|approve|check|input|reply)|need.*(human|approval|confirm|auth)|auth.*(required|failed|expired|error)|login|sign[\s_\-]*in|unauthoriz|forbidden|api[\s_\-]*key|token.*(invalid|expired|missing|required)|2fa|mfa|otp|承認|許可|確認が必要|人間の(確認|承認|判断|入力|対応)|認証(が必要|に失敗|エラー)|ログイン|再ログイン|トークン|有効期限|権限が(必要|ありません|不足)|対話的に|手動で|聞き返|質問に答え/i;
+  // 実行中なのに人間の返答待ちっぽいパターン（y/n・選択肢・質問文）。停滞ヒントで人間に返答を促す用。
+  const ASK_RE = /\[y\/n\]|\(y\/n\)|\[Y\/n\]|\(yes\/no\)|yes\/no|press (enter|any key)|press \[|choose (one|an option)|select (one|an option)|continue\?|proceed\?|are you sure|do you want|shall I|may I|承認しますか|続行しますか|実行しますか|よろしいですか|入力してください|選択してください|答えてください|教えてください|\?\s*$/i;
 
   function toast(msg, isErr) {
     let t = $("toast");
@@ -143,7 +155,29 @@ window.AIBridge = (() => {
     S.runExited = false;
     S.exitCode = null;
     S.limitNotified = false;
+    S.recovering = false;
+    S.recoverFor = null;
+    S.recoverAttempts = 0;
+    S.lastTrouble = null;
     if (statusText) setStatus(statusText, true);
+  }
+
+  function humanNeededReason(text) {
+    const t = String(text || "");
+    if (!t) return null;
+    const m = t.match(HUMAN_RE);
+    return m ? m[0] : null;
+  }
+
+  function isAskingHuman(text) {
+    return ASK_RE.test(String(text || ""));
+  }
+
+  // フェーズごとのトラブル報告ファイル名（相互リカバリーの伝言板）
+  function troubleFileFor(kind) {
+    if (kind === "instruction") return "trouble-instruction.md";
+    if (kind === "review") return "trouble-review.md";
+    return "trouble-done.md";
   }
 
   function isLimitHit(text) {
@@ -280,11 +314,101 @@ window.AIBridge = (() => {
     );
   }
 
+  // もう1つのAIへ投げるトラブル解決プロンプト。
+  // 失敗した側の出力末尾と期待ファイルを渡し、解決可能なら直して再実行の下地を作らせる。
+  // どうしても人間の確認が必要な場合だけ、その旨を trouble ファイルに書かせる。
+  function troubleshootPromptFor(kind, failedLabel, expectedName, tail) {
+    const troubleName = troubleFileFor(kind);
+    const tailHead = String(tail || "").slice(-1500) || "(出力なし)";
+    const common =
+      `あなたはAI連携のトラブル解決担当です。別のAI（${failedLabel}）が「${expectedName}」を作らずに終了しました。\n\n` +
+      `【失敗したAIの出力末尾】\n${tailHead}\n\n` +
+      `【あなたの仕事】\n` +
+      `1. 「${BRIDGE}/task.md」と既存の伝言ファイル（instruction.md / done.md / review-ok.md / instruction2.md）を読んでください。\n` +
+      `2. 作業ディレクトリの内容・エラー内容を調査し、原因を特定してください。` +
+      `依存不足・コマンド不足・権限・パス間違い・単純なエラーなど、あなたが解決できるものは可能な範囲で直接解決してください。\n` +
+      `3. あなたが解決・対応したら、その内容を踏まえて本来の担当AIが再実行できる状態にしてください。\n` +
+      `4. 調査結果を「${BRIDGE}/${troubleName}」に必ず書いてください。` +
+      `形式: 原因 / あなたが行った対応 / 再実行への助言（次の実行者が読む具体的な指示）。\n` +
+      `5. どうしても人間の確認・返答が必要な場合（権限承認・認証・ログイン・課金・曖昧な仕様の判断など、AIだけでは進めない場合）に限り、` +
+      `trouble ファイルの先頭に「HUMAN-NEEDED: 」で始まる行を書き、人間に何をしてほしいか（ターミナルで返答すべき内容・確認手順）を明記してください。\n` +
+      `6. trouble ファイルの作成があなたの完了条件です。作成したら終了してください。`;
+    return common;
+  }
+
+  function runTroubleshoot(kind, failedLabel, expectedName, tail) {
+    const prompt = troubleshootPromptFor(kind, failedLabel, expectedName, tail);
+    if (kind === "instruction" || kind === "review") {
+      // cline(PM)が失敗 → もう1つのAI=opencode に問いかける
+      S.currentRun = { pane: "opencode", kind: "troubleshoot" };
+      log(`成果物なしのため、もう1つのAI（opencode）にトラブル解決を問いかけます（${failedLabel} の失敗を調査）。`);
+      const args = autoApprove() ? ["run", "--auto", prompt] : ["run", prompt];
+      if (!window.App.termExecIn(S.opencodeId, "opencode", args)) {
+        toast("opencode への問いかけに失敗しました", true);
+        return false;
+      }
+      return true;
+    }
+    // opencode(実装)が失敗 → もう1つのAI=cline(PM) に問いかける
+    S.currentRun = { pane: "cline", kind: "troubleshoot" };
+    log(`成果物なしのため、もう1つのAI（cline PM）にトラブル解決を問いかけます（${failedLabel} の失敗を調査）。`);
+    const args = autoApprove() ? [prompt] : ["--auto-approve", "false", prompt];
+    if (!window.App.termExecIn(S.clineId, "cline", args)) {
+      toast("cline への問いかけに失敗しました", true);
+      return false;
+    }
+    return true;
+  }
+
+  // トラブル解決を踏まえた再実行（本来の担当AIをもう一度走らせる）
+  function rerunAfterTrouble(kind, trouble) {
+    const hint = String(trouble || "").slice(0, 2000);
+    S.recovering = false;
+    S.recoverFor = null;
+    S.runExited = false;
+    S.failNotified = false;
+    S.phaseSince = Date.now();
+    if (kind === "instruction") {
+      log("トラブル解決の結果を踏まえて cline(PM) を再実行します。");
+      S.currentRun = { pane: "cline", kind: "pm" };
+      const base = pmPrompt(S.task);
+      const args = autoApprove() ? [base + `\n\n【前回の失敗とトラブル解決の報告】\n${hint}`] : ["--auto-approve", "false", base + `\n\n【前回の失敗とトラブル解決の報告】\n${hint}`];
+      window.App.termExecIn(S.clineId, "cline", args);
+      setStatusKeepRecover("連携中: cline(PM) が指示書を作成中…（再実行）");
+    } else if (kind === "done") {
+      log("トラブル解決の結果を踏まえて opencode を再実行します。");
+      const prompt = devPrompt(S.lastFix || S.lastInstruction || "") + `\n\n【前回の失敗とトラブル解決の報告】\n${hint}`;
+      const args = autoApprove() ? ["run", "--auto", prompt] : ["run", prompt];
+      S.currentRun = { pane: "opencode", kind: S.lastFix ? "fix" : "dev" };
+      window.App.termExecIn(S.opencodeId, "opencode", args);
+      setStatusKeepRecover("連携中: opencode が実装中…（再実行）");
+    } else {
+      log("トラブル解決の結果を踏まえて cline(PM:レビュー) を再実行します。");
+      const prompt = reviewPrompt(S.lastDone || "") + `\n\n【前回の失敗とトラブル解決の報告】\n${hint}`;
+      const args = autoApprove() ? [prompt] : ["--auto-approve", "false", prompt];
+      S.currentRun = { pane: "cline", kind: "review" };
+      window.App.termExecIn(S.clineId, "cline", args);
+      setStatusKeepRecover("連携中: cline がレビュー中…（再実行）");
+    }
+  }
+
+  // setPhase のリカバリー状態リセットを避けてステータスだけ変える（再実行時の表示用）
+  function setStatusKeepRecover(text) {
+    S.phaseSince = Date.now();
+    S.hinted = false;
+    setStatus(text, true);
+  }
+
   // ---- 監視ループ ----
 
   async function poll() {
     if (!S.running) return;
     try {
+      // もう1つのAIがトラブル解決中なら、そちらを優先監視する
+      if (S.recovering && S.recoverFor) {
+        await pollRecovering();
+        return;
+      }
       if (S.phase === "wait-instruction") {
         const ins = await readText(bp("instruction.md"));
         if (ins && ins.trim() && ins !== S.lastInstruction) {
@@ -294,7 +418,7 @@ window.AIBridge = (() => {
           setPhase("wait-done", "連携中: opencode が実装中…");
           return;
         }
-        stallOrFailCheck("cline(PM)", S.clineId, bp("instruction.md"), () => runClinePM());
+        await stallOrFailCheck("instruction", "cline(PM)", S.clineId, "instruction.md");
       } else if (S.phase === "wait-done") {
         const done = await readText(bp("done.md"));
         if (done && done.trim() && done !== S.lastDone) {
@@ -307,9 +431,7 @@ window.AIBridge = (() => {
         if (limitCheck("opencode", S.opencodeId, () =>
           runOpencodeDev(S.lastFix || S.lastInstruction || "")
         )) return;
-        stallOrFailCheck("opencode", S.opencodeId, bp("done.md"), () =>
-          runOpencodeDev(S.lastFix || S.lastInstruction || "")
-        );
+        await stallOrFailCheck("done", "opencode", S.opencodeId, "done.md");
       } else if (S.phase === "wait-review") {
         const ok = await readText(bp("review-ok.md"));
         if (ok && ok.trim() && ok !== S.lastReview) {
@@ -331,30 +453,123 @@ window.AIBridge = (() => {
           setPhase("wait-done", "連携中: opencode が修正中…");
           return;
         }
-        stallOrFailCheck("cline(PM:レビュー)", S.clineId, bp("review-ok.md"), () =>
-          runClineReview(S.lastDone || "")
-        );
+        await stallOrFailCheck("review", "cline(PM:レビュー)", S.clineId, "review-ok.md / instruction2.md");
       }
     } catch (e) {
       log("ポーリングエラー: " + (e.message || e));
     }
   }
 
-  // 実行終了後に成果物が無い場合の失敗通知と、長時間停滞時のヒント
-  function stallOrFailCheck(label, paneId, expectedFile, rerun) {
-    void expectedFile;
-    void rerun;
-    const now = Date.now();
+  // もう1つのAIによるトラブル解決中の監視。
+  // trouble ファイルが出たら人間の確認が必要か判定し、必要なら人間に通知して返答を促す。
+  // 解決可能なら本来の担当AIを再実行する。解決側も失敗したら人間に通知する。
+  async function pollRecovering() {
+    const kind = S.recoverFor;
+    const troubleName = troubleFileFor(kind);
+    const trouble = await readText(bp(troubleName));
+    if (trouble && trouble.trim() && trouble !== S.lastTrouble) {
+      S.lastTrouble = trouble;
+      if (/^\s*HUMAN-NEEDED/m.test(trouble) || humanNeededReason(trouble)) {
+        S.recovering = false;
+        S.failNotified = true;
+        S.runExited = false;
+        log("もう1つのAIが「人間の確認が必要」と判断しました。ターミナルと報告を確認して返答してください。");
+        notifyHuman("AI連携: 人間の確認が必要です", trouble.slice(0, 300));
+        setStatus("要確認: 人間の返答待ち", true);
+        return;
+      }
+      log("もう1つのAIがトラブル報告を出しました。本来の工程を再実行します。");
+      rerunAfterTrouble(kind, trouble);
+      return;
+    }
+    // トラブル解決側が使用制限に達した場合は回復待ち（失敗扱いにしない）
+    const troublePane = (kind === "done") ? S.clineId : S.opencodeId;
+    const tail = paneTail(troublePane, 5000);
+    if (isLimitHit(tail)) {
+      if (!S.limitNotified) {
+        S.limitNotified = true;
+        log("トラブル解決中のAIが使用制限に達したようです。回復を待っています。");
+      }
+      setStatus("連携中: トラブル解決AIのリミット回復待ち…", true);
+      // 制限中に終了していたら再開できるようフラグだけ戻す（次ポーリングで再判定）
+      if (S.runExited) S.runExited = false;
+      return;
+    }
     if (S.runExited && !S.failNotified) {
       S.failNotified = true;
+      S.recovering = false;
+      S.runExited = false;
+      const tailShort = paneTail(troublePane, 3000).slice(-800);
+      const reason = humanNeededReason(tailShort);
+      log("トラブル解決の問いかけも成果物なしで終了しました。ターミナルで出力を確認してください。");
+      notifyHuman(
+        reason ? "AI連携: 人間の確認が必要です（トラブル解決中）" : "AI連携: トラブル解決も失敗しました。人間の確認をお願いします",
+        (reason ? `人間の確認が必要な可能性があります（${reason}）。` : "") + (tailShort.slice(-300) || "出力を確認してください")
+      );
+      setStatus("要確認: トラブル解決も失敗・人間の返答待ち", true);
+      return;
+    }
+    if (!S.hinted && Date.now() - S.phaseSince > STALL_HINT_MS) {
+      S.hinted = true;
+      const t = paneTail(troublePane, 3000).slice(-800);
+      if (isAskingHuman(t) || humanNeededReason(t)) {
+        log("ヒント: トラブル解決中のAIが人間の返答待ちのようです。ターミナルで内容を確認して返答してください。");
+        notifyHuman("AI連携: トラブル解決AIが人間の返答待ちです", t.slice(-300));
+      } else {
+        log("ヒント: トラブル解決に5分以上かかっています。「ターミナルの状態を表示」で出力を確認してください。");
+      }
+    }
+  }
+
+  // 成果物なし終了時は、まず人間の確認が必要か判定し、不要ならもう1つのAIに
+  // 問いかけて解決・再実行させる。解決不能／上限超過のときだけ人間に通知して返答させる。
+  async function stallOrFailCheck(kind, label, paneId, expectedName) {
+    const now = Date.now();
+    if (S.runExited && !S.failNotified) {
       const tail = paneTail(paneId, 3000).slice(-800);
-      log(`${label} は終了しましたが成果物がまだありません。ターミナルで出力を確認してください。`);
+      const reason = humanNeededReason(tail);
+      if (reason) {
+        S.failNotified = true;
+        log(`${label} は人間の確認が必要な内容で終了したようです（${reason}）。ターミナルで確認して返答してください。`);
+        notifyHuman(`AI連携: ${label} が人間の確認待ちで終了しました`, `確認が必要な内容: ${reason} / ` + (tail.slice(-300) || "出力を確認してください"));
+        setStatus("要確認: 人間の返答待ち", true);
+        return;
+      }
+      if (S.recoverAttempts < MAX_RECOVER) {
+        S.recoverAttempts++;
+        S.recovering = true;
+        S.recoverFor = kind;
+        S.runExited = false;
+        S.failNotified = false;
+        S.hinted = false;
+        S.limitNotified = false;
+        S.phaseSince = now;
+        S.lastTrouble = "";
+        try { await API.writeFile(bp(troubleFileFor(kind)), ""); } catch {}
+        setStatus(`連携中: ${label} の失敗をもう1つのAIが調査中…（${S.recoverAttempts}/${MAX_RECOVER}）`, true);
+        const ok = runTroubleshoot(kind, label, expectedName, tail);
+        if (!ok) {
+          S.recovering = false;
+          S.failNotified = true;
+          notifyHuman(`AI連携: ${label} が成果物なしで終了しました`, tail.slice(-300) || "出力を確認してください");
+        }
+        return;
+      }
+      S.failNotified = true;
+      log(`${label} は終了しましたが成果物がまだありません（${MAX_RECOVER}回の相互解決も失敗）。ターミナルで出力を確認してください。`);
       notifyHuman(`AI連携: ${label} が成果物なしで終了しました`, tail.slice(-300) || "出力を確認してください");
+      setStatus("要確認: 成果物なし・人間の返答待ち", true);
       return;
     }
     if (!S.hinted && now - S.phaseSince > STALL_HINT_MS) {
       S.hinted = true;
-      log(`ヒント: ${label} の処理が5分以上続いています。進みが無い場合は「ターミナルの状態を表示」で出力を確認し、必要なら「現在のフェーズを再実行」を押してください。`);
+      const tail = paneTail(paneId, 3000).slice(-800);
+      if (isAskingHuman(tail) || humanNeededReason(tail)) {
+        log(`ヒント: ${label} が人間の返答待ちのようです。ターミナルで内容を確認して返答してください（許可・認証・質問など）。`);
+        notifyHuman(`AI連携: ${label} が人間の返答待ちです`, tail.slice(-300) || "ターミナルで確認して返答してください");
+      } else {
+        log(`ヒント: ${label} の処理が5分以上続いています。進みが無い場合は「ターミナルの状態を表示」で出力を確認し、必要なら「現在のフェーズを再実行」を押してください。`);
+      }
     }
   }
 
@@ -387,7 +602,7 @@ window.AIBridge = (() => {
       return;
     }
     // 古い伝言ファイルをリセット（task は残す）
-    for (const f of ["instruction.md", "done.md", "review-ok.md", "instruction2.md", "approval.md"]) {
+    for (const f of ["instruction.md", "done.md", "review-ok.md", "instruction2.md", "approval.md", "trouble-instruction.md", "trouble-done.md", "trouble-review.md"]) {
       try { await API.writeFile(bp(f), ""); } catch {}
     }
     try {
@@ -452,6 +667,8 @@ window.AIBridge = (() => {
     S.runExited = false;
     S.failNotified = false;
     S.limitNotified = false;
+    S.recovering = false;
+    S.recoverFor = null;
     S.phaseSince = Date.now();
     if (S.phase === "wait-instruction") {
       log("現在のフェーズ（cline:指示書作成）を再実行します。");
