@@ -107,7 +107,7 @@ const API = (() => {
       addExisting: (p, init) => API.post("/api/github/repos/existing", { path: p, init: !!init }),
       action: (id, action, message) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/action", { action, message }),
       branch: (id, branch) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/action", { action: "branch", branch }),
-      cleanupBranches: (id) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/action", { action: "cleanup" }),
+      cleanupBranches: (id, preview) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/action", { action: "cleanup", preview: !!preview }),
       createGitignore: (id) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/gitignore"),
       createAgentsMd: (id) => API.post("/api/github/repos/" + encodeURIComponent(id) + "/agents-md"),
       templates: () => API.get("/api/github/templates"),

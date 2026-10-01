@@ -329,7 +329,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "1.9.2",
+    version: "2.0.0",
     bootId: BOOT_ID,
     workspace: ROOT,
     distro: DISTRO,
@@ -1226,6 +1226,23 @@ function parseStatusFileLine(line) {
   return { code: line.slice(0, 2).trim() || "?", path: f };
 }
 
+// "Deleted branch foo (was ...)" / "Would delete branch foo (was ...)" の出力から
+// ブランチ名を取り出す（git branch --delete-merged 用。Git 2.56+）
+function parseDeleteMergedOutput(text) {
+  const out = [];
+  for (const line of String(text || "").split("\n")) {
+    const m = line.match(/(?:Would delete|Deleted) branch (\S+) \(was [0-9a-f]+\)/);
+    if (m) out.push(m[1].replace(/\.$/, ""));
+  }
+  return out;
+}
+
+// git branch --delete-merged が使えない古い git か判定する
+function isDeleteMergedUnsupported(r) {
+  const t = (r.stdout || "") + "\n" + (r.stderr || "");
+  return /unknown option|unknown.*delete-merged|not a (valid|git)|invalid/i.test(t);
+}
+
 function githubRepoId() {
   return "r-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
 }
@@ -1543,6 +1560,9 @@ app.post("/api/github/repos", async (req, res, next) => {
     if (r.code !== 0) {
       return res.status(500).json({ error: "クローンに失敗しました", output: (r.stdout + r.stderr).trim() });
     }
+    // リモートの既定ブランチ改名に気づけるよう fetch.followRemoteHEAD を有効化する
+    // （値は create/warn/always/never の列挙型。warn = HEAD 差異を警告＋無ければ作成）
+    await runGit(target, ["config", "fetch.followRemoteHEAD", "warn"], 10000).catch(() => {});
     const repo = { id: githubRepoId(), name: defaultName, path: target, url };
     githubCfg.repos.push(repo);
     await saveGithubConfig();
@@ -1665,42 +1685,83 @@ app.post("/api/github/repos/:id/action", async (req, res, next) => {
       return res.json({ ok: crR.code === 0, action, output });
     }
     if (action === "cleanup") {
+      const preview = !!req.body.preview;
       // git fetch --prune でリモートの最新状態を取得
       await runGit(repo.path, ["fetch", "--prune"], 60000);
       // 現在チェックアウト中のブランチを取得
       const curBr = await runGit(repo.path, ["branch", "--show-current"], 5000);
       const currentBranch = (curBr.stdout || "").trim();
-      // ブランチ一覧を取得（追跡情報を含む）
+      // (1) [origin/...: gone] となっているブランチを検出（リモートで削除済み）
       const listR = await runGit(repo.path, ["branch", "-vv", "--no-color"], 10000);
       if (listR.code !== 0) {
         return res.json({ ok: false, action, output: (listR.stdout + listR.stderr).trim() });
       }
       // [origin/...: gone] となっているブランチを検出
       const lines = (listR.stdout || "").split("\n");
-      const toDelete = [];
+      const gone = [];
       for (const line of lines) {
         const m = line.match(/^\*?\s+(\S+)\s+\S+\s+\[origin\/[^:]+:\s+gone\]/);
         if (m) {
           const branchName = m[1];
-          if (branchName !== currentBranch) toDelete.push(branchName);
+          if (branchName !== currentBranch) gone.push(branchName);
         }
       }
-      if (!toDelete.length) {
-        return res.json({ ok: true, action, deleted: [], output: "削除するブランチはありません" });
+      // (2) upstream に取り込み済みのブランチを検出（Git 2.56+ の --delete-merged）。
+      // リモート枝が残っていても作業が upstream 到達済みなら整理対象になる。
+      // upstream 未設定の枝・checkout 中の枝は安全のため対象外になる。
+      // 古い git では対応しないためスキップする（gone 削除のみ行う）。
+      let merged = [];
+      let mergedUnsupported = false;
+      const dryR = await runGit(repo.path, ["branch", "--delete-merged", "origin/*", "--dry-run"], 30000);
+      if (dryR.code === 0) {
+        merged = parseDeleteMergedOutput(dryR.stdout).filter((b) => b !== currentBranch);
+      } else if (isDeleteMergedUnsupported(dryR)) {
+        mergedUnsupported = true;
+      } else {
+        // dry-run 自体の失敗は致命的にしない（gone 削除は続行する）
+        merged = [];
+      }
+      if (preview) {
+        const bits = [];
+        if (gone.length) bits.push("リモート削除済み: " + gone.join(", "));
+        if (merged.length) bits.push("取り込み済み: " + merged.join(", "));
+        if (mergedUnsupported) bits.push("※取り込み済み検出は git 2.56+ が必要です（この環境では無効）");
+        return res.json({
+          ok: true, action, preview: true, gone, merged, mergedUnsupported,
+          deleted: [],
+          output: bits.length ? bits.join("\n") : "削除するブランチはありません",
+        });
       }
       const deleted = [];
+      const goneDeleted = [];
+      const mergedDeleted = [];
       const errors = [];
-      for (const b of toDelete) {
+      for (const b of gone) {
         const r = await runGit(repo.path, ["branch", "-d", b], 30000);
         if (r.code === 0) {
           deleted.push(b);
+          goneDeleted.push(b);
         } else {
           errors.push(b + ": " + (r.stdout + r.stderr).trim());
         }
       }
+      if (!mergedUnsupported && merged.length) {
+        const r = await runGit(repo.path, ["branch", "--delete-merged", "origin/*"], 30000);
+        if (r.code === 0) {
+          for (const b of parseDeleteMergedOutput(r.stdout)) {
+            if (!deleted.includes(b)) deleted.push(b);
+            if (!mergedDeleted.includes(b)) mergedDeleted.push(b);
+          }
+        } else if (isDeleteMergedUnsupported(r)) {
+          mergedUnsupported = true;
+        } else {
+          errors.push("取り込み済み削除: " + (r.stdout + r.stderr).trim());
+        }
+      }
       const output = deleted.length ? "削除: " + deleted.join(", ") : "";
       const errOutput = errors.length ? "\n削除失敗:\n" + errors.join("\n") : "";
-      return res.json({ ok: true, action, deleted, output: (output + errOutput).trim() || "完了" });
+      const note = mergedUnsupported ? "\n※取り込み済み検出は git 2.56+ が必要です（この環境では無効）" : "";
+      return res.json({ ok: true, action, deleted, goneDeleted, mergedDeleted, mergedUnsupported, output: (output + errOutput + note).trim() || "完了" });
     }
     if (action === "pull") {
       let r = await runGit(repo.path, ["pull"], 120000);
@@ -2095,6 +2156,8 @@ app.post("/api/github/repos/:id/first-push", async (req, res, next) => {
     if (pushR.code === 0) {
       repo.url = url;
       await saveGithubConfig();
+      // リモートの既定ブランチ改名に気づけるよう fetch.followRemoteHEAD を有効化する
+      await runGit(repo.path, ["config", "fetch.followRemoteHEAD", "warn"], 10000).catch(() => {});
     }
     res.json({ ok: pushR.code === 0, output: parts.filter(Boolean).join("\n\n") });
   } catch (e) {

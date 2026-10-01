@@ -317,7 +317,7 @@ const GithubPanel = (() => {
       "</div>" +
       '<div class="gh-repo-meta-row">' +
       '<span class="gh-branch-btn" data-act="branch" title="ブランチを切替・作成">branch: ' + esc(r.branch || "—") + ' ▾</span>' +
-      '<button class="btn small gh-cleanup-btn" data-act="cleanup" title="リモートで削除済みのローカルブランチを一括削除">ブランチ自動整理</button>' +
+      '<button class="btn small gh-cleanup-btn" data-act="cleanup" title="リモート削除済み・取り込み済み（Git 2.56+）のローカルブランチをプレビュー後に一括削除">ブランチ自動整理</button>' +
       "</div>" +
       (meta ? '<div class="gh-repo-meta">' + esc(meta) + "</div>" : "") +
       '<div class="gh-repo-actions">' +
@@ -658,9 +658,28 @@ const GithubPanel = (() => {
   async function doCleanupBranches(id) {
     const item = $("gh-repos").querySelector(`.gh-repo[data-id="${CSS.escape(id)}"]`);
     const btn = item && item.querySelector(".gh-cleanup-btn");
-    if (btn) { btn.disabled = true; btn.textContent = "整理中…"; }
+    if (btn) { btn.disabled = true; btn.textContent = "確認中…"; }
     try {
-      const res = await API.github.cleanupBranches(id);
+      // 先にプレビュー取得（削除はしない）。Git 2.56+ なら取り込み済み枝も含む
+      const pv = await API.github.cleanupBranches(id, true);
+      if (!pv.ok) {
+        toast(pv.output || "ブランチ整理の確認に失敗しました", true);
+        return;
+      }
+      const gone = pv.gone || [];
+      const merged = pv.merged || [];
+      const targets = [...gone, ...merged.filter((b) => !gone.includes(b))];
+      if (!targets.length) {
+        toast(pv.mergedUnsupported ? "削除するブランチはありません（取り込み済み検出は git 2.56+ が必要）" : "削除するブランチはありません");
+        renderRepos();
+        return;
+      }
+      const lines = [];
+      if (gone.length) lines.push("リモート削除済み: " + gone.join(", "));
+      if (merged.length) lines.push("取り込み済み: " + merged.join(", "));
+      if (!confirm("以下のブランチを削除しますか？\n\n" + lines.join("\n") + "\n\n※現在のブランチ・upstream未設定の枝は対象外です")) return;
+      if (btn) btn.textContent = "整理中…";
+      const res = await API.github.cleanupBranches(id, false);
       if (res.ok) {
         const deleted = res.deleted || [];
         if (deleted.length) {
@@ -668,6 +687,7 @@ const GithubPanel = (() => {
         } else {
           toast("削除するブランチはありません");
         }
+        if (res.mergedUnsupported) toast("※取り込み済み検出は git 2.56+ が必要です", true);
       } else {
         toast(res.output || "ブランチ整理に失敗しました", true);
       }
