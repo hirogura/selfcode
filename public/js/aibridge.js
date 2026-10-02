@@ -5,6 +5,7 @@
  *   done.md         opencodeが実装完了時に書く完了報告 → clineへ引き継ぎ
  *   review-ok.md    clineがレビューOK時に書く承認 → 人間に通知
  *   instruction2.md clineが修正を求める場合の追加指示 → opencodeへ再実行
+ *   follow-<side>-*.md 実行中の人間からの追加指示に対する各AIの報告（side-task 完了検知用）
  * 各AIはプロンプトをコマンドライン引数で受けて実行し、終了する
  * （cline "prompt" / opencode run [--auto] "prompt"）。完了検知は終了通知＋ファイル監視。
  */
@@ -38,6 +39,8 @@ window.AIBridge = (() => {
     limitResetUntil: 0, // 制限解除予定時刻（ms epoch）。相対表記から算出した場合は初回検知時にラッチする
     limitResetLabel: "", // 表示用ラベル（例: "15:30（あと25分）"）
     limitRaw: "", // 解除時間の根拠となった出力抜粋
+    // 実行中の追加指示（人間→PM/実装）用。担当外ペイン宛は進行フローと独立に追跡する。
+    followRun: null, // { pane: "cline"|"opencode", file, active, exited, code, notified }
     // 成果物なし終了時の相互リカバリー用
     recovering: false, // もう1つのAIにトラブル解決を問いかけ中
     recoverFor: null, // "instruction" | "done" | "review"
@@ -467,6 +470,13 @@ window.AIBridge = (() => {
     if (!S.running || !pane) return;
     const role = pane.id === S.clineId ? "cline" : pane.id === S.opencodeId ? "opencode" : null;
     if (!role) return;
+    if (S.followRun && S.followRun.active && S.followRun.pane === role) {
+      S.followRun.exited = true;
+      S.followRun.code = code;
+      const flabel = role === "cline" ? "cline(PM)" : "opencode";
+      log(`${flabel} の追加指示の実行が終了しました (exit ${code ?? "?"})。結果を確認します。`);
+      return;
+    }
     if (S.currentRun && S.currentRun.pane === role) {
       S.runExited = true;
       S.exitCode = code;
@@ -523,6 +533,125 @@ window.AIBridge = (() => {
       `【修正指示の抜粋】\n${String(fix || "").slice(0, 4000)}\n\n` +
       `対応完了後は「${BRIDGE}/done.md」を更新してください（更新があなたの完了条件です）。`
     );
+  }
+
+  // ---- 実行中の追加指示（人間 → PM / 実装） ----
+  // 連携実行中に、人間がどちら側かを指定して追加の作業を投げる。
+  // 進行中のフェーズ担当と同じペイン宛なら「差し替え」（現在の実行を中断し、追加指示付きで担当継続）、
+  // 空いている側宛なら「side-task」（結果ファイルで完了を検知し、人間に通知）として扱う。
+
+  function followPromptFor(target, text, file, dutyNote, guardNote) {
+    const side = target === "cline" ? "PM（cline）" : "プログラマー（opencode）";
+    return (
+      `AI連携の実行中に、人間からあなた（${side}）への追加指示が届きました。\n\n` +
+      `【追加指示】\n${String(text || "").slice(0, 4000)}\n\n` +
+      `【参考】まず「${BRIDGE}/task.md」を読んでください。` +
+      (target === "cline"
+        ? `「${BRIDGE}/instruction.md」「${BRIDGE}/done.md」があれば合わせて読んでください。\n\n`
+        : `「${BRIDGE}/instruction.md」（無ければ task.md のみ）を読んで背景を把握してください。\n\n`) +
+      (dutyNote ? `【進行中の担当】\n${dutyNote}\n\n` : "") +
+      (guardNote ? `【注意】\n${guardNote}\n\n` : "") +
+      `【あなたの仕事】\n` +
+      `1. 追加指示の内容に対応してください（調査・ファイル編集・テスト等、必要に応じて実行）。\n` +
+      `2. 対応が終わったら結果を「${BRIDGE}/${file}」に必ず書いてください。` +
+      `形式: 対応内容 / 変更ファイル一覧 / 残課題（無ければ「なし」）。\n` +
+      `3. 結果ファイルの作成があなたの完了条件です。作成したら終了してください。`
+    );
+  }
+
+  // 差し替え時（担当ペイン宛）に、元の担当も続けさせるための一文
+  function followDutyNote(target) {
+    if (target === "cline" && S.phase === "wait-instruction")
+      return `あなたは指示書作成の担当です。追加指示への対応とあわせ、指示書「${BRIDGE}/instruction.md」の作成・更新も進めてください（指示書の完成が本来の完了条件です）。`;
+    if (target === "cline" && S.phase === "wait-review")
+      return `あなたはレビューの担当です。追加指示への対応とあわせ、完了報告の確認と「${BRIDGE}/review-ok.md」または「${BRIDGE}/instruction2.md」の作成も進めてください。`;
+    if (target === "opencode" && S.phase === "wait-done")
+      return `あなたは実装の担当です。追加指示への対応とあわせ、本来の実装作業も進め、完了したら「${BRIDGE}/done.md」を作成・更新してください（done.md の完成が本来の完了条件です）。`;
+    return "";
+  }
+
+  async function sendFollow() {
+    if (!S.running) {
+      toast("AI連携が実行中ではありません", true);
+      return;
+    }
+    const target = ($("aibridge-follow-target") && $("aibridge-follow-target").value === "opencode") ? "opencode" : "cline";
+    const text = ($("aibridge-follow-text") ? $("aibridge-follow-text").value : "").trim();
+    if (!text) {
+      toast("追加指示を入力してください", true);
+      return;
+    }
+    const paneId = target === "cline" ? S.clineId : S.opencodeId;
+    if (!paneId) {
+      toast("対象のターミナルが確保されていません", true);
+      return;
+    }
+    const label = target === "cline" ? "cline(PM)" : "opencode";
+    const isMainPane = !!(S.currentRun && S.currentRun.pane === target && !S.runExited);
+    const isFollowBusy = !!(S.followRun && S.followRun.active && S.followRun.pane === target && !S.followRun.exited);
+    if (isMainPane || isFollowBusy) {
+      const busyWhat = isMainPane ? "現在のフェーズの作業" : "前回の追加指示";
+      if (typeof confirm === "function" && !confirm(`${label} は${busyWhat}を実行中です。追加指示を送ると現在の実行を中断します。よろしいですか？`)) return;
+    }
+    const file = `follow-${target}-${Date.now().toString(36)}.md`;
+    try { await API.writeFile(bp(file), ""); } catch (e) {
+      toast("結果ファイルの作成に失敗: " + (e.message || e), true);
+      return;
+    }
+    const redirect = isMainPane; // 担当ペイン宛 = 差し替え、それ以外 = side-task
+    const dutyNote = redirect ? followDutyNote(target) : "";
+    const guardNote = redirect ? "" : "進行中の連携フロー（他方のAIの作業・伝言ファイル）は壊さないでください。instruction.md / done.md / review-ok.md / instruction2.md は、追加指示で明示された場合を除き上書きしないでください。";
+    const prompt = followPromptFor(target, text, file, dutyNote, guardNote);
+    const args = target === "cline"
+      ? (autoApprove() ? [prompt] : ["--auto-approve", "false", prompt])
+      : (autoApprove() ? ["run", "--auto", prompt] : ["run", prompt]);
+    if (!window.App.termExecIn(paneId, target === "cline" ? "cline" : "opencode", args)) {
+      toast(`${label} への送信に失敗しました`, true);
+      return;
+    }
+    if (redirect) {
+      // トラブル解決の問いかけを中断した場合、回復フローは取り消して通常監視に戻す
+      if (S.recovering) {
+        S.recovering = false;
+        S.recoverFor = null;
+        S.lastTrouble = null;
+      }
+      S.currentRun = { pane: target, kind: "follow" };
+      S.runExited = false;
+      S.exitCode = null;
+      S.failNotified = false;
+      S.phaseSince = Date.now();
+      log(`${label} の実行を中断し、追加指示を送りました（担当継続）。結果は ${file} に報告させます。`);
+    } else {
+      S.followRun = { pane: target, file, active: true, exited: false, code: null, notified: false };
+      log(`${label} に追加指示を送りました。結果は ${file} に報告させます。`);
+    }
+    if (target === "opencode" && S.limitResetUntil && Date.now() < S.limitResetUntil) {
+      log(`注意: opencode は使用制限の回復待ちです（解除予定 ${S.limitResetLabel || "不明"}）。制限中の実行は失敗する可能性があります。`);
+    }
+    const ta = $("aibridge-follow-text");
+    if (ta) ta.value = "";
+  }
+
+  // side-task の追加指示の完了を監視する。結果ファイルが出たら人間に通知する。
+  async function pollFollow() {
+    const f = S.followRun;
+    if (!f || !f.active) return;
+    const label = f.pane === "cline" ? "cline(PM)" : "opencode";
+    const content = await readText(bp(f.file));
+    if (content && content.trim()) {
+      S.followRun = null;
+      log(`${label} が追加指示に対応しました（${f.file}）。`);
+      notifyHuman(`AI連携: ${label} が追加指示に対応しました`, content.slice(0, 300));
+      return;
+    }
+    if (f.exited && !f.notified) {
+      f.notified = true;
+      S.followRun = null;
+      const tail = paneTail(f.pane === "cline" ? S.clineId : S.opencodeId, 3000).slice(-800);
+      log(`${label} の追加指示の実行が終了しましたが報告ファイルがありません。ターミナルで出力を確認してください。`);
+      notifyHuman(`AI連携: ${label} の追加指示が報告なしで終了しました`, tail.slice(-300) || "出力を確認してください");
+    }
   }
 
   // もう1つのAIへ投げるトラブル解決プロンプト。
@@ -615,6 +744,8 @@ window.AIBridge = (() => {
   async function poll() {
     if (!S.running) return;
     try {
+      // 追加指示（side-task）の完了を進行フローと独立に確認する
+      await pollFollow();
       // もう1つのAIがトラブル解決中なら、そちらを優先監視する
       if (S.recovering && S.recoverFor) {
         await pollRecovering();
@@ -853,6 +984,7 @@ window.AIBridge = (() => {
     S.running = true;
     S.lastInstruction = S.lastDone = S.lastReview = S.lastFix = null;
     S.currentRun = null;
+    S.followRun = null;
     S.lastLimitRetry = 0;
     S.limitNotified = false;
     S.limitResetUntil = 0;
@@ -874,6 +1006,7 @@ window.AIBridge = (() => {
       setStatus("停止中", false);
       return;
     }
+    S.followRun = null;
     finish();
     S.phase = "idle";
     setStatus("停止中", false);
@@ -975,6 +1108,8 @@ window.AIBridge = (() => {
     if (btnResend) btnResend.onclick = resend;
     const btnDiag = $("aibridge-diag");
     if (btnDiag) btnDiag.onclick = diag;
+    const btnFollow = $("aibridge-follow-send");
+    if (btnFollow) btnFollow.onclick = () => { sendFollow().catch((e) => toast(e.message || String(e), true)); };
     try {
       const saved = localStorage.getItem("selfcode.aibridge.dir");
       if (saved && $("aibridge-dir") && !$("aibridge-dir").value) $("aibridge-dir").value = saved;
@@ -998,5 +1133,5 @@ window.AIBridge = (() => {
     } catch {}
   });
 
-  return { open, close, show, hide, toggle, start, stop, resend, diag };
+  return { open, close, show, hide, toggle, start, stop, resend, diag, follow: sendFollow };
 })();
