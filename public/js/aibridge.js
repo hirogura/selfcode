@@ -35,6 +35,9 @@ window.AIBridge = (() => {
     lastFix: null,
     lastLimitRetry: 0,
     limitNotified: false,
+    limitResetUntil: 0, // 制限解除予定時刻（ms epoch）。相対表記から算出した場合は初回検知時にラッチする
+    limitResetLabel: "", // 表示用ラベル（例: "15:30（あと25分）"）
+    limitRaw: "", // 解除時間の根拠となった出力抜粋
     // 成果物なし終了時の相互リカバリー用
     recovering: false, // もう1つのAIにトラブル解決を問いかけ中
     recoverFor: null, // "instruction" | "done" | "review"
@@ -155,6 +158,9 @@ window.AIBridge = (() => {
     S.runExited = false;
     S.exitCode = null;
     S.limitNotified = false;
+    S.limitResetUntil = 0;
+    S.limitResetLabel = "";
+    S.limitRaw = "";
     S.recovering = false;
     S.recoverFor = null;
     S.recoverAttempts = 0;
@@ -184,40 +190,245 @@ window.AIBridge = (() => {
     return LIMIT_RE.test(String(text || ""));
   }
 
-  // opencode フェーズで使用制限（レート/セッションリミット）を検知したら、
+  // ---- 使用制限の解除時間の抽出・表示 ----
+  // ターミナルの出力末尾から「あと何分」「何時に解除」といった情報を抜き出す。
+  // 相対表記（in 25 minutes / retry after 30s / あと5分）と絶対表記（resets at 15:30 / ISO日時）の両方に対応する。
+  function unitToMs(n, unit) {
+    const u = String(unit || "s").toLowerCase();
+    if (u.startsWith("day") || u === "d") return n * 86400000;
+    if (u.startsWith("hour") || u.startsWith("hr") || u === "h") return n * 3600000;
+    if (u.startsWith("min") || u === "m") return n * 60000;
+    return n * 1000; // sec / s
+  }
+
+  function formatDurJa(ms) {
+    const s = Math.max(1, Math.round(ms / 1000));
+    if (s < 60) return `${s}秒`;
+    const m = Math.floor(s / 60);
+    if (m < 60) {
+      const rs = s % 60;
+      return rs ? `${m}分${rs}秒` : `${m}分`;
+    }
+    const h = Math.floor(m / 60);
+    if (h < 48) {
+      const rm = m % 60;
+      return rm ? `${h}時間${rm}分` : `${h}時間`;
+    }
+    const d = Math.floor(h / 24);
+    const rh = h % 24;
+    return rh ? `${d}日${rh}時間` : `${d}日`;
+  }
+
+  function formatResetJa(resetAtMs) {
+    const d = new Date(resetAtMs);
+    const now = new Date();
+    const hm = d.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", hour12: false });
+    if (d.toDateString() === now.toDateString()) return hm;
+    return d.toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+  }
+
+  function formatLimitLabel(resetAtMs, now) {
+    if (!resetAtMs) return "";
+    const diff = resetAtMs - (now || Date.now());
+    const when = formatResetJa(resetAtMs);
+    if (diff <= 0) return `${when}（まもなく解除見込み）`;
+    return `${when}（あと${formatDurJa(diff)}）`;
+  }
+
+  // "15:30" や "3:30 PM" を今日/明日の時刻として解釈する（過去時刻は明日扱い）
+  function parseClockTime(s) {
+    const m = String(s || "").match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]\.?M\.?)?/i);
+    if (!m) return null;
+    let h = Number(m[1]);
+    const min = Number(m[2]);
+    const sec = Number(m[3] || 0);
+    const ap = (m[4] || "").toUpperCase();
+    if (ap.startsWith("P") && h < 12) h += 12;
+    if (ap.startsWith("A") && h === 12) h = 0;
+    if (h > 23 || min > 59 || sec > 59) return null;
+    const now = new Date();
+    const d = new Date(now);
+    d.setHours(h, min, sec, 0);
+    if (d.getTime() <= now.getTime()) d.setDate(d.getDate() + 1);
+    return d.getTime();
+  }
+
+  // 日本語の日付（10月5日 15:30 等）を解釈する。過ぎていれば来年扱い。
+  function parseJaDate(m) {
+    const now = new Date();
+    const mo = Number(m[1]);
+    const day = Number(m[2]);
+    const h = m[3] !== undefined ? Number(m[3]) : 0;
+    const min = m[4] !== undefined ? Number(m[4]) : 0;
+    if (!(mo >= 1 && mo <= 12 && day >= 1 && day <= 31 && h <= 23 && min <= 59)) return null;
+    const ts = new Date(now.getFullYear(), mo - 1, day, h, min, 0, 0).getTime();
+    if (ts > now.getTime()) return ts;
+    return new Date(now.getFullYear() + 1, mo - 1, day, h, min, 0, 0).getTime();
+  }
+
+  // 出力末尾から解除時間情報を抜き出す。{ waitMs, resetAtMs, absolute, raw } または null。
+  function parseLimitReset(text) {
+    const t = String(text || "");
+    if (!t) return null;
+    const scope = t.slice(-5000);
+    const snippet = (idx, len) => scope.slice(Math.max(0, idx - 80), idx + (len || 0) + 80).replace(/\s+/g, " ").trim().slice(0, 200);
+    let m;
+    // 1) ISO日時（絶対）
+    m = scope.match(/(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2}| ?(?:UTC|JST))?)/);
+    if (m) {
+      const ts = Date.parse(m[1].replace(" ", "T"));
+      if (Number.isFinite(ts)) return { waitMs: null, resetAtMs: ts, absolute: true, raw: snippet(m.index, m[0].length) };
+    }
+    // 2) epoch秒/ミリ秒
+    m = scope.match(/(?:reset|retry|available|after|at)[^\d\n]{0,20}(\d{10,13})(?!\d)/i);
+    if (m) {
+      let ts = Number(m[1]);
+      if (Number.isFinite(ts)) {
+        if (m[1].length === 10) ts *= 1000;
+        const now = Date.now();
+        if (ts > now - 60000 && ts < now + 7 * 86400000) return { waitMs: null, resetAtMs: ts, absolute: true, raw: snippet(m.index, m[0].length) };
+      }
+    }
+    // 3) 時刻 HH:MM（絶対・今日/明日として解釈）
+    m = scope.match(/(?:resets?|resetting|available|try again|retry|back|after|at)[^\n\d]{0,20}?(\d{1,2}:\d{2}(?::\d{2})?\s*(?:[AP]\.?M\.?)?)/i);
+    if (m) {
+      const ts = parseClockTime(m[1]);
+      if (ts) return { waitMs: null, resetAtMs: ts, absolute: true, raw: snippet(m.index, m[0].length) };
+    }
+    // 4) 英語の日付（October 5 等）
+    m = scope.match(/(?:resets?|reset|renews?|renewal|available)[^\n]{0,30}?\bon\s+((?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*\d{4})?)/i);
+    if (m) {
+      let ts;
+      if (/,?\s*\d{4}/.test(m[1])) {
+        ts = Date.parse(m[1]);
+      } else {
+        // 年なし（"October 5" 等）は今年の日付として解釈する（Date.parse 既定の2001年を避ける）。
+        // 序数接尾辞（1st / 2nd / 3rd / 4th）は Date.parse が NaN になるため除去する。
+        const dayOnly = m[1].replace(/(\d{1,2})(st|nd|rd|th)\b/i, "$1");
+        ts = Date.parse(dayOnly + " " + new Date().getFullYear());
+      }
+      if (Number.isFinite(ts)) {
+        if (ts < Date.now()) ts = new Date(ts).setFullYear(new Date(ts).getFullYear() + 1);
+        return { waitMs: null, resetAtMs: ts, absolute: true, raw: snippet(m.index, m[0].length) };
+      }
+    }
+    // 5) 日本語の日付（10月5日 15:30 等）
+    m = scope.match(/(\d{1,2})月\s*(\d{1,2})日(?:\s*(\d{1,2})[時:：](\d{1,2})?)?/);
+    if (m) {
+      const ts = parseJaDate(m);
+      if (ts) return { waitMs: null, resetAtMs: ts, absolute: true, raw: snippet(m.index, m[0].length) };
+    }
+    // 6) 相対: retry after N[unit]（単位省略時は秒）
+    m = scope.match(/retry[\s_\-]*after\s+(\d+(?:\.\d+)?)\s*(seconds?|secs?|s|minutes?|mins?|m(?!s)|hours?|hrs?|h|days?|d)?\b/i);
+    if (m) {
+      const waitMs = unitToMs(parseFloat(m[1]), m[2] || "s");
+      if (Number.isFinite(waitMs) && waitMs > 0 && waitMs < 30 * 86400000)
+        return { waitMs, resetAtMs: Date.now() + waitMs, absolute: false, raw: snippet(m.index, m[0].length) };
+    }
+    // 7) 相対: in N unit（"1h 20m" のような複数単位も合算）
+    m = scope.match(/\bin\s+(\d+(?:\.\d+)?\s*(?:seconds?|secs?|s|minutes?|mins?|m(?!s)|hours?|hrs?|h|days?|d)(?:\s+\d+(?:\.\d+)?\s*(?:seconds?|secs?|s|minutes?|mins?|m(?!s)|hours?|hrs?|h|days?|d))*)/i);
+    if (m) {
+      let total = 0;
+      const re = /(\d+(?:\.\d+)?)\s*(seconds?|secs?|s|minutes?|mins?|m(?!s)|hours?|hrs?|h|days?|d)/gi;
+      let mm;
+      while ((mm = re.exec(m[1]))) total += unitToMs(parseFloat(mm[1]), mm[2]);
+      if (total > 0 && total < 30 * 86400000)
+        return { waitMs: total, resetAtMs: Date.now() + total, absolute: false, raw: snippet(m.index, m[0].length) };
+    }
+    // 8) 相対: "N unit until reset / remaining" 等
+    m = scope.match(/(\d+(?:\.\d+)?)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)\s+(?:until|to\s+reset|before(?:\s+retry)?|remaining)/i);
+    if (m) {
+      const waitMs = unitToMs(parseFloat(m[1]), m[2]);
+      if (Number.isFinite(waitMs) && waitMs > 0 && waitMs < 30 * 86400000)
+        return { waitMs, resetAtMs: Date.now() + waitMs, absolute: false, raw: snippet(m.index, m[0].length) };
+    }
+    // 9) 日本語の相対（あと5分 / 5分後）
+    m = scope.match(/(?:あと\s*(\d+(?:\.\d+)?)\s*(秒|分|時間|日))|((\d+(?:\.\d+)?)\s*(秒|分|時間|日)\s*(後|待ち|で(?:解除|回復)|後に(?:解除|回復)))/);
+    if (m) {
+      const num = parseFloat(m[1] || m[4]);
+      const unit = m[2] || m[5];
+      const mult = unit === "秒" ? 1000 : unit === "分" ? 60000 : unit === "時間" ? 3600000 : 86400000;
+      const waitMs = num * mult;
+      if (Number.isFinite(waitMs) && waitMs > 0 && waitMs < 30 * 86400000)
+        return { waitMs, resetAtMs: Date.now() + waitMs, absolute: false, raw: snippet(m.index, m[0].length) };
+    }
+    return null;
+  }
+
+  // ターミナル出力から解除時間情報を取り出し、S にラッチして表示ラベルを返す。
+  // 相対表記は初回検知時の時刻基準で固定する（毎ポーリング now+wait では未来へ漂移するため）。
+  // テスト用に window.__parseLimitReset として公開する。
+  function currentLimitInfo(tail) {
+    const parsed = parseLimitReset(tail);
+    if (parsed && parsed.absolute && parsed.resetAtMs) {
+      S.limitResetUntil = parsed.resetAtMs;
+      S.limitRaw = parsed.raw || "";
+    } else if (parsed && parsed.resetAtMs && !S.limitResetUntil) {
+      S.limitResetUntil = parsed.resetAtMs;
+      S.limitRaw = parsed.raw || "";
+    }
+    if (S.limitResetUntil) {
+      S.limitResetLabel = formatLimitLabel(S.limitResetUntil, Date.now());
+      return { resetAtMs: S.limitResetUntil, label: S.limitResetLabel, raw: S.limitRaw };
+    }
+    if (parsed && parsed.raw) return { resetAtMs: null, label: "", raw: parsed.raw };
+    return { resetAtMs: null, label: "", raw: "" };
+  }
+  try { window.__parseLimitReset = parseLimitReset; } catch {}
+
+  // 使用制限（レート/セッションリミット）を検知したら、解除時間付きで表示し、
   // 設定に応じて自動再開する。true を返したら通常の失敗通知はスキップする。
   function limitCheck(label, paneId, rerun) {
     const tail = paneTail(paneId, 5000);
     if (!isLimitHit(tail)) return false;
+    const info = currentLimitInfo(tail);
+    const resetPart = info.label ? ` 制限解除予定: ${info.label}` : "（解除時間不明）";
+    const waitingStatus = `連携中: ${label} リミット回復待ち${info.label ? `（解除予定 ${info.label}）` : ""}`;
     if (!autoResume()) {
       if (!S.limitNotified) {
         S.limitNotified = true;
-        log(`${label} が使用制限に達したようです（自動再開OFF）。回復後に「再実行」を押してください。`);
-        notifyHuman(`AI連携: ${label} が使用制限に達しました`, tail.slice(-300) || "回復後に再実行してください");
+        log(`${label} が使用制限に達したようです（自動再開OFF）。${resetPart}`);
+        if (info.raw) log(`制限メッセージ抜粋: ${info.raw}`);
+        notifyHuman(`AI連携: ${label} が使用制限に達しました。${resetPart}`, (info.raw ? info.raw + " / " : "") + (tail.slice(-300) || "回復後に再実行してください"));
       }
+      setStatus(waitingStatus + "・回復後に「再実行」を押してください", true);
       return true;
     }
-    // 自動再開ON: 実行中なら回復待ち（重複起動しない）、終了済みなら間隔を空けて再実行
+    // 自動再開ON: 実行中なら回復待ち（重複起動しない）、終了済みなら解除予定まで待って再実行
     if (S.runExited) {
       const now = Date.now();
+      if (S.limitResetUntil && now < S.limitResetUntil) {
+        if (!S.limitNotified) {
+          S.limitNotified = true;
+          log(`${label} が使用制限に達したようです。${resetPart} 回復後に自動で再開します。`);
+          if (info.raw) log(`制限メッセージ抜粋: ${info.raw}`);
+        }
+        setStatus(waitingStatus + "・自動再開…", true);
+        S.runExited = false; // 制限中の終了は失敗扱いにせず、次ポーリングで再判定する
+        return true;
+      }
       if (now - S.lastLimitRetry >= LIMIT_RETRY_MS) {
         S.lastLimitRetry = now;
         S.runExited = false;
         S.failNotified = false;
         S.limitNotified = false;
         S.phaseSince = now;
-        log(`${label} が使用制限に達したため、自動で再開します。`);
-        setStatus("連携中: opencode リミット回復待ち・自動再開…", true);
+        log(`${label} が使用制限に達したため、自動で再開します。${resetPart}`);
+        setStatus(waitingStatus + "・自動再開…", true);
+        S.limitResetUntil = 0;
+        S.limitResetLabel = "";
+        S.limitRaw = "";
         rerun();
       } else {
-        setStatus("連携中: opencode リミット回復待ち・自動再開…", true);
+        setStatus(waitingStatus + "・自動再開…", true);
       }
     } else {
       if (!S.limitNotified) {
         S.limitNotified = true;
-        log(`${label} が使用制限に達したようです。回復を待っています（自動再開ON）。`);
+        log(`${label} が使用制限に達したようです。回復を待っています（自動再開ON）。${resetPart}`);
+        if (info.raw) log(`制限メッセージ抜粋: ${info.raw}`);
       }
-      setStatus("連携中: opencode リミット回復待ち…", true);
+      setStatus(waitingStatus + "…", true);
     }
     return true;
   }
@@ -410,6 +621,7 @@ window.AIBridge = (() => {
         return;
       }
       if (S.phase === "wait-instruction") {
+        if (limitCheck("cline(PM)", S.clineId, () => runClinePM())) return;
         const ins = await readText(bp("instruction.md"));
         if (ins && ins.trim() && ins !== S.lastInstruction) {
           S.lastInstruction = ins;
@@ -453,6 +665,9 @@ window.AIBridge = (() => {
           setPhase("wait-done", "連携中: opencode が修正中…");
           return;
         }
+        if (limitCheck("cline(PM:レビュー)", S.clineId, () =>
+          runClineReview(S.lastDone || "")
+        )) return;
         await stallOrFailCheck("review", "cline(PM:レビュー)", S.clineId, "review-ok.md / instruction2.md");
       }
     } catch (e) {
@@ -486,11 +701,14 @@ window.AIBridge = (() => {
     const troublePane = (kind === "done") ? S.clineId : S.opencodeId;
     const tail = paneTail(troublePane, 5000);
     if (isLimitHit(tail)) {
+      const tinfo = currentLimitInfo(tail);
+      const treset = tinfo.label ? ` 制限解除予定: ${tinfo.label}` : "（解除時間不明）";
       if (!S.limitNotified) {
         S.limitNotified = true;
-        log("トラブル解決中のAIが使用制限に達したようです。回復を待っています。");
+        log(`トラブル解決中のAIが使用制限に達したようです。回復を待っています。${treset}`);
+        if (tinfo.raw) log(`制限メッセージ抜粋: ${tinfo.raw}`);
       }
-      setStatus("連携中: トラブル解決AIのリミット回復待ち…", true);
+      setStatus(`連携中: トラブル解決AIのリミット回復待ち${tinfo.label ? `（解除予定 ${tinfo.label}）` : ""}…`, true);
       // 制限中に終了していたら再開できるようフラグだけ戻す（次ポーリングで再判定）
       if (S.runExited) S.runExited = false;
       return;
@@ -637,6 +855,9 @@ window.AIBridge = (() => {
     S.currentRun = null;
     S.lastLimitRetry = 0;
     S.limitNotified = false;
+    S.limitResetUntil = 0;
+    S.limitResetLabel = "";
+    S.limitRaw = "";
     setPhase("wait-instruction", "連携中: cline(PM) が指示書を作成中…");
     log(`連携開始（作業: ${S.dir || "/"} / ターミナル1:cline PM / ターミナル2:opencode 実装 / 自動承認:${autoApprove() ? "ON" : "OFF"} / リミット後自動再開:${autoResume() ? "ON" : "OFF"}）`);
 
@@ -667,6 +888,9 @@ window.AIBridge = (() => {
     S.runExited = false;
     S.failNotified = false;
     S.limitNotified = false;
+    S.limitResetUntil = 0;
+    S.limitResetLabel = "";
+    S.limitRaw = "";
     S.recovering = false;
     S.recoverFor = null;
     S.phaseSince = Date.now();
