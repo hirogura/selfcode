@@ -122,7 +122,7 @@
           </select>
           <button id="aibridge-follow-send" class="btn small primary" title="選択した側のターミナルで追加指示を実行する">送信</button>
         </div>
-        <div class="aibridge-hint">流れ: ①clineに指示→指示書(.ai-bridge/instruction.md)作成 ②opencodeが実装→完了報告(.ai-bridge/done.md) ③clineがレビュー→OKなら人間に通知。各AIはプロンプト付きで実行され、終了後に次の工程へ進みます。成果物なしで終了した場合はもう1つのAIが原因を調査・解決して再実行し、人間の確認が必要な場合のみ通知します。進まない場合は「状態表示」で出力を確認してください。実行中は「追加指示」からPM / 実装のどちらかを指定して作業を投げられます（例: 実装のリミット待ちの間にPMへ調査を依頼）。</div>
+        <div class="aibridge-hint">流れ: ①clineが指示書(.ai-bridge/instruction.md)を簡潔・短時間で作成 ②opencodeが実装→完了報告(.ai-bridge/done.md) ③clineがレビュー→OKなら人間に通知。各工程は「実行終了＋ファイル安定」を確認してから引き継ぎます。指示書の不備はopencodeが質問→clineが修正とAI同士で解決し、レビュー差し戻しもAI同士で再実行します（人間は最終確認のみ）。成果物なしで終了した場合ももう1つのAIが調査・解決して再実行します。進まない場合は「状態表示」で出力を確認してください。実行中は「追加指示」からPM / 実装のどちらかを指定して作業を投げられます。</div>
         <div id="aibridge-log" class="aibridge-log"></div>
       </div>
     </aside>

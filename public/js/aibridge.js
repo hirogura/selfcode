@@ -2,18 +2,25 @@
  * 方式: ターミナル2ペインで非対話ラン + 作業ディレクトリ直下の .ai-bridge/ ファイル群を伝言板にする。
  *   task.md         人間の最初の指示（ブリッジが作成）
  *   instruction.md  cline(PM)が作成する詳細指示書 → opencodeへ引き継ぎ
+ *   instruction-question.md opencodeが指示書の不備を見つけた場合の質問 → clineが修正
  *   done.md         opencodeが実装完了時に書く完了報告 → clineへ引き継ぎ
  *   review-ok.md    clineがレビューOK時に書く承認 → 人間に通知
  *   instruction2.md clineが修正を求める場合の追加指示 → opencodeへ再実行
  *   follow-<side>-*.md 実行中の人間からの追加指示に対する各AIの報告（side-task 完了検知用）
  * 各AIはプロンプトをコマンドライン引数で受けて実行し、終了する
- * （cline "prompt" / opencode run [--auto] "prompt"）。完了検知は終了通知＋ファイル監視。
+ * （cline "prompt" / opencode run [--auto] "prompt"）。完了検知は終了通知＋ファイル安定確認。
+ * v2.3.0: 指示書は簡潔・短時間で作成し、工程の引き継ぎは「実行終了＋ファイル安定」で判定する。
+ * 指示書の不備・レビュー差し戻しはAI同士で直接やり取りし、人間には最終確認のみ求める。
  */
 window.AIBridge = (() => {
   const $ = (id) => document.getElementById(id);
   const BRIDGE = ".ai-bridge";
-  const POLL_MS = 4000;
+  const POLL_MS = 2500;
   const STALL_HINT_MS = 5 * 60 * 1000;
+  // 工程引き継ぎのゲート: 書きかけのファイルを拾って早期開始しないよう、
+  // 「実行終了＋内容が安定（連続ポーリングで同一内容）＋最低文字数」を満たして初めて引き継ぐ。
+  const STABLE_ROUNDS = 2;
+  const MIN_ARTIFACT_LEN = 20;
 
   const S = {
     running: false,
@@ -34,6 +41,9 @@ window.AIBridge = (() => {
     lastDone: null,
     lastReview: null,
     lastFix: null,
+    lastQuestion: null,
+    stable: {}, // ゲート用: key -> { text, hits }
+    handoffNotified: {}, // ゲート用: key -> 検出済み内容（「作成を検出、完了確認中」の重複ログ防止）
     lastLimitRetry: 0,
     limitNotified: false,
     limitResetUntil: 0, // 制限解除予定時刻（ms epoch）。相対表記から算出した場合は初回検知時にラッチする
@@ -168,6 +178,8 @@ window.AIBridge = (() => {
     S.recoverFor = null;
     S.recoverAttempts = 0;
     S.lastTrouble = null;
+    S.stable = {};
+    S.handoffNotified = {};
     if (statusText) setStatus(statusText, true);
   }
 
@@ -180,6 +192,39 @@ window.AIBridge = (() => {
 
   function isAskingHuman(text) {
     return ASK_RE.test(String(text || ""));
+  }
+
+  // ---- 工程引き継ぎゲート（早期開始・完了誤判定の防止） ----
+  // 書きかけ検出を防ぐため、引き継ぎは次の3点をすべて満たしたときのみ行う。
+  //   1. 担当AIの実行が終了している（S.runExited）
+  //   2. 内容が最低文字数以上で、前回引き継ぎ済みと異なる
+  //   3. 同一内容が連続 STABLE_ROUNDS 回観測されている（保存中の部分書き込みを拾わない）
+  function artifactReady(key, content, lastSeen) {
+    const text = String(content || "");
+    if (!text.trim() || text.trim().length < MIN_ARTIFACT_LEN) {
+      S.stable[key] = null;
+      return false;
+    }
+    if (lastSeen != null && text === lastSeen) {
+      S.stable[key] = null;
+      return false;
+    }
+    const prev = S.stable[key];
+    if (prev && prev.text === text) {
+      prev.hits += 1;
+    } else {
+      S.stable[key] = { text, hits: 1 };
+      const nkey = key + "@" + text.slice(0, 64);
+      if (!S.handoffNotified[nkey]) {
+        S.handoffNotified[nkey] = true;
+        log("成果物ファイルの作成を検出しました。実行終了と内容の安定を確認中です…");
+      }
+      return false;
+    }
+    if (S.stable[key].hits < STABLE_ROUNDS) return false;
+    if (!S.runExited) return false;
+    S.stable[key] = null;
+    return true;
   }
 
   // フェーズごとのトラブル報告ファイル名（相互リカバリーの伝言板）
@@ -466,6 +511,17 @@ window.AIBridge = (() => {
     }
   }
 
+  // opencodeからの指示書質問を受けて cline(PM) に修正させる（AI同士の直接やり取り）
+  function runClineRevise(question) {
+    const prompt = pmRevisePrompt(question, S.lastInstruction || "");
+    const args = autoApprove() ? [prompt] : ["--auto-approve", "false", prompt];
+    S.currentRun = { pane: "cline", kind: "pm-revise" };
+    log("opencodeからの質問を受け、cline(PM)に指示書の修正を依頼します（AI同士で解決）。");
+    if (!window.App.termExecIn(S.clineId, "cline", args)) {
+      toast("ターミナル1への起動に失敗しました", true);
+    }
+  }
+
   function onExit(pane, code) {
     if (!S.running || !pane) return;
     const role = pane.id === S.clineId ? "cline" : pane.id === S.opencodeId ? "opencode" : null;
@@ -489,49 +545,63 @@ window.AIBridge = (() => {
 
   function pmPrompt(task) {
     return (
-      `あなたはこのプロジェクトのPM（プロジェクトマネージャー）です。` +
-      `まず「${BRIDGE}/task.md」を読んでください（人間の最初の指示が書かれています。参考: ${task}）。\n\n` +
-      `【あなたの仕事】\n` +
-      `1. 作業ディレクトリ（カレントディレクトリ）の内容を調査し、タスクを具体的な実装手順に分解してください。\n` +
-      `2. 詳細な指示書を「${BRIDGE}/instruction.md」に必ず作成してください。` +
-      `ファイル形式: 目的 / 前提 / 変更対象ファイル一覧 / 手順（番号付き）/ 受け入れ条件（テスト・動作確認の方法）/ 注意事項。\n` +
-      `3. 指示書ファイルの作成があなたの完了条件です。ファイルを作成したら終了してください。`
+      `あなたはこのプロジェクトのPMです。簡潔に・短時間で指示書を作ってください。` +
+      `まず「${BRIDGE}/task.md」を読んでください（人間の最初の指示。参考: ${task}）。\n\n` +
+      `【速さの約束】\n` +
+      `1. 最小限の調査だけ行い、深掘り・全体検証・テスト実行はしないでください（目安5分以内）。\n` +
+      `2. 指示書は要点のみ・簡潔に（目安30行以内）。目的 / 変更対象ファイル / 手順（番号付き・最小限）/ 受け入れ条件（確認方法のみ）だけ書いてください。\n` +
+      `3. 不明点は推測で補わず「要確認」として1行で残してください（opencode側が質問してAI同士で解決します）。\n` +
+      `4. 「${BRIDGE}/instruction.md」を作成したら速やかに終了してください。長考・再検証は不要です。`
+    );
+  }
+
+  function pmRevisePrompt(question, instruction) {
+    const q = String(question || "").slice(0, 2000);
+    return (
+      `あなたはPMです。簡潔に・短時間で指示書を修正してください。\n\n` +
+      `プログラマー（opencode）から指示書への質問・指摘が「${BRIDGE}/instruction-question.md」に届きました。\n` +
+      `【質問・指摘】\n${q}\n\n` +
+      `1. 質問内容と「${BRIDGE}/instruction.md」「${BRIDGE}/task.md」を読んでください。\n` +
+      `2. 指摘が正しければ instruction.md を簡潔に修正し、誤解なら質問への回答を instruction.md に1〜3行で追記してください。\n` +
+      `3. 修正後は速やかに終了してください（再検証は不要です）。人間への確認は求めないでください。`
     );
   }
 
   function devPrompt(instruction) {
     const head = String(instruction || "").slice(0, 6000);
     return (
-      `あなたはプログラマー担当です。PM（cline）の指示書に従って実装を行ってください。\n\n` +
+      `あなたはプログラマー担当です。簡潔に・速やかに実装してください。\n\n` +
       `まず「${BRIDGE}/instruction.md」の全文を読んでください（以下は抜粋です）。\n` +
       `【指示書の抜粋】\n${head}\n\n` +
       `【ルール】\n` +
-      `1. 受け入れ条件を満たすまで実装・テストを進めてください。\n` +
-      `2. 実装が完了したら「${BRIDGE}/done.md」に次の内容を必ず書いてください: ` +
+      `1. 指示書におかしい点・不明点・矛盾があれば、推測で進めず「${BRIDGE}/instruction-question.md」に質問・問題点を書いて終了してください（PMが修正します。人間への確認は不要です）。\n` +
+      `2. 問題なければ受け入れ条件を満たすまで実装・テストを進めてください。\n` +
+      `3. 完了したら「${BRIDGE}/done.md」に簡潔に書いて終了してください: ` +
       `変更ファイル一覧 / 実施内容 / テスト結果 / 残課題（無ければ「なし」）。\n` +
-      `3. done.md の作成があなたの完了条件です。作成したら終了してください。`
+      `4. 追加の検証・長考は不要です。done.md の作成が完了条件です。`
     );
   }
 
   function reviewPrompt(done) {
     const head = String(done || "").slice(0, 4000);
     return (
-      `あなたはPM（プロジェクトマネージャー）です。プログラマー（opencode）の完了報告をレビューしてください。\n\n` +
+      `あなたはPMです。簡潔に・短時間でレビューしてください。\n\n` +
       `まず「${BRIDGE}/done.md」の全文を読んでください（以下は抜粋です）。\n` +
       `【完了報告の抜粋】\n${head}\n\n` +
-      `1. done.md の内容と、実際の変更内容（git diff 等）を確認してください。\n` +
-      `2. 問題なければ「${BRIDGE}/review-ok.md」にレビュー結果（OK の根拠）を必ず書いてください。\n` +
-      `3. 修正が必要なら「${BRIDGE}/instruction2.md」に具体的な追加指示を書いてください。\n` +
-      `4. ファイルの作成があなたの完了条件です。作成したら終了してください。`
+      `1. done.md と実際の変更（git diff 等）を最小限で確認してください（深掘り・再検証は不要です）。\n` +
+      `2. 問題なければ「${BRIDGE}/review-ok.md」にOKの根拠を1〜3行で書いて終了してください。\n` +
+      `3. 修正が必要なら「${BRIDGE}/instruction2.md」に具体的な追加指示を簡潔に書いて終了してください（opencodeが対応します。人間への確認は不要です）。\n` +
+      `4. OKと修正指示の両方は書かないでください。どちらか一方だけ作成し、速やかに終了してください。`
     );
   }
 
   function fixPrompt(fix) {
     return (
-      `PM から修正指示が出ました。「${BRIDGE}/instruction2.md」の全文を読んで対応してください。` +
+      `PM から修正指示が出ました。簡潔に・速やかに対応してください。「${BRIDGE}/instruction2.md」の全文を読んでください。` +
       `（「${BRIDGE}/instruction.md」も合わせて参照してください）\n\n` +
       `【修正指示の抜粋】\n${String(fix || "").slice(0, 4000)}\n\n` +
-      `対応完了後は「${BRIDGE}/done.md」を更新してください（更新があなたの完了条件です）。`
+      `対応完了後は「${BRIDGE}/done.md」を簡潔に更新して速やかに終了してください（更新が完了条件です）。` +
+      `指示書におかしい点があれば推測で進めず「${BRIDGE}/instruction-question.md」に書いて終了してください。`
     );
   }
 
@@ -754,7 +824,8 @@ window.AIBridge = (() => {
       if (S.phase === "wait-instruction") {
         if (limitCheck("cline(PM)", S.clineId, () => runClinePM())) return;
         const ins = await readText(bp("instruction.md"));
-        if (ins && ins.trim() && ins !== S.lastInstruction) {
+        // 書きかけ拾い防止: 実行終了＋安定した内容になって初めて引き継ぐ
+        if (artifactReady("instruction", ins, S.lastInstruction)) {
           S.lastInstruction = ins;
           log("cline が指示書を作成しました。opencode に引き継ぎます。");
           runOpencodeDev(ins);
@@ -763,8 +834,19 @@ window.AIBridge = (() => {
         }
         await stallOrFailCheck("instruction", "cline(PM)", S.clineId, "instruction.md");
       } else if (S.phase === "wait-done") {
+        // 指示書への質問はAI同士で解決する（人間には通知しない）。差し戻し相当として最優先で扱う。
+        const q = await readText(bp("instruction-question.md"));
+        if (artifactReady("question", q, S.lastQuestion)) {
+          S.lastQuestion = q;
+          log("opencode が指示書に質問を出しました。cline に修正を依頼します（AI同士で解決）。");
+          try { await API.writeFile(bp("instruction-question.md"), ""); } catch {}
+          S.stable["question"] = null;
+          runClineRevise(q);
+          setPhase("wait-instruction", "連携中: cline(PM) が指示書を修正中…（AI同士で解決）");
+          return;
+        }
         const done = await readText(bp("done.md"));
-        if (done && done.trim() && done !== S.lastDone) {
+        if (artifactReady("done", done, S.lastDone)) {
           S.lastDone = done;
           log("opencode が完了報告を出しました。cline にレビューを依頼します。");
           runClineReview(done);
@@ -776,24 +858,28 @@ window.AIBridge = (() => {
         )) return;
         await stallOrFailCheck("done", "opencode", S.opencodeId, "done.md");
       } else if (S.phase === "wait-review") {
+        // 差し戻しをOKより優先する: 同じランで両方が書かれた場合も修正を確実に拾う。
+        // どちらも「実行終了＋安定」ゲートを通ったものだけ受け付ける。
+        const fix = await readText(bp("instruction2.md"));
+        const fixReady = artifactReady("fix", fix, S.lastFix) && fix !== S.lastInstruction;
         const ok = await readText(bp("review-ok.md"));
-        if (ok && ok.trim() && ok !== S.lastReview) {
+        const okReady = artifactReady("review-ok", ok, S.lastReview);
+        if (fixReady) {
+          S.lastFix = fix;
+          log("cline が修正指示を出しました。opencode に再実行させます（AI同士で解決）。");
+          S.currentRun = { pane: "opencode", kind: "fix" };
+          const args = autoApprove() ? ["run", "--auto", fixPrompt(fix)] : ["run", fixPrompt(fix)];
+          window.App.termExecIn(S.opencodeId, "opencode", args);
+          setPhase("wait-done", "連携中: opencode が修正中…");
+          return;
+        }
+        if (okReady) {
           S.lastReview = ok;
           S.phase = "done";
           setStatus("連携完了: 人間の確認待ち", false);
           finish();
           notifyHuman("AI連携が完了しました。人間の確認をお願いします", ok.slice(0, 300));
           log("cline がレビューOKを出しました。人間の確認をお願いします。");
-          return;
-        }
-        const fix = await readText(bp("instruction2.md"));
-        if (fix && fix.trim() && fix !== S.lastFix && fix !== S.lastInstruction) {
-          S.lastFix = fix;
-          log("cline が修正指示を出しました。opencode に再実行させます。");
-          S.currentRun = { pane: "opencode", kind: "fix" };
-          const args = autoApprove() ? ["run", "--auto", fixPrompt(fix)] : ["run", fixPrompt(fix)];
-          window.App.termExecIn(S.opencodeId, "opencode", args);
-          setPhase("wait-done", "連携中: opencode が修正中…");
           return;
         }
         if (limitCheck("cline(PM:レビュー)", S.clineId, () =>
@@ -951,7 +1037,7 @@ window.AIBridge = (() => {
       return;
     }
     // 古い伝言ファイルをリセット（task は残す）
-    for (const f of ["instruction.md", "done.md", "review-ok.md", "instruction2.md", "approval.md", "trouble-instruction.md", "trouble-done.md", "trouble-review.md"]) {
+    for (const f of ["instruction.md", "instruction-question.md", "done.md", "review-ok.md", "instruction2.md", "approval.md", "trouble-instruction.md", "trouble-done.md", "trouble-review.md"]) {
       try { await API.writeFile(bp(f), ""); } catch {}
     }
     try {
@@ -982,7 +1068,9 @@ window.AIBridge = (() => {
     } catch {}
 
     S.running = true;
-    S.lastInstruction = S.lastDone = S.lastReview = S.lastFix = null;
+    S.lastInstruction = S.lastDone = S.lastReview = S.lastFix = S.lastQuestion = null;
+    S.stable = {};
+    S.handoffNotified = {};
     S.currentRun = null;
     S.followRun = null;
     S.lastLimitRetry = 0;
@@ -1026,6 +1114,8 @@ window.AIBridge = (() => {
     S.limitRaw = "";
     S.recovering = false;
     S.recoverFor = null;
+    S.stable = {};
+    S.handoffNotified = {};
     S.phaseSince = Date.now();
     if (S.phase === "wait-instruction") {
       log("現在のフェーズ（cline:指示書作成）を再実行します。");
