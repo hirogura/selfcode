@@ -1200,6 +1200,14 @@ window.AIBridge = (() => {
     if (btnDiag) btnDiag.onclick = diag;
     const btnFollow = $("aibridge-follow-send");
     if (btnFollow) btnFollow.onclick = () => { sendFollow().catch((e) => toast(e.message || String(e), true)); };
+    const btnHint = $("aibridge-hint-toggle");
+    const hintBox = $("aibridge-hint");
+    if (btnHint && hintBox) btnHint.onclick = () => {
+      const collapsed = hintBox.classList.toggle("collapsed");
+      hintBox.hidden = collapsed;
+      btnHint.textContent = collapsed ? "▲" : "▼";
+      btnHint.title = collapsed ? "説明を表示" : "説明を折りたたむ";
+    };
     try {
       const saved = localStorage.getItem("selfcode.aibridge.dir");
       if (saved && $("aibridge-dir") && !$("aibridge-dir").value) $("aibridge-dir").value = saved;

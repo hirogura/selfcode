@@ -13,7 +13,7 @@
   <header id="topbar">
     <div class="brand">
       <span class="logo"><svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><text x="36" y="70" font-size="52" text-anchor="middle" fill="#fff" font-family="monospace" font-weight="bold">S</text><polyline points="58,40 80,54 58,68" fill="none" stroke="#d1d5db" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-      <span class="title-wrap"><span class="title">selfcode</span><span class="version">v.2.3.0</span></span>
+      <span class="title-wrap"><span class="title">selfcode</span><span class="version">v.2.3.1</span></span>
     </div>
     <button id="btn-explorer" class="btn toggle active" title="エクスプローラの表示切替"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>
     <button id="btn-refresh" class="btn" title="リフレッシュ"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
@@ -121,8 +121,9 @@
             <option value="opencode">実装（opencode）に指示</option>
           </select>
           <button id="aibridge-follow-send" class="btn small primary" title="選択した側のターミナルで追加指示を実行する">送信</button>
+          <button id="aibridge-hint-toggle" class="btn small" title="説明の表示/非表示">▲</button>
         </div>
-        <div class="aibridge-hint">流れ: ①clineが指示書(.ai-bridge/instruction.md)を簡潔・短時間で作成 ②opencodeが実装→完了報告(.ai-bridge/done.md) ③clineがレビュー→OKなら人間に通知。各工程は「実行終了＋ファイル安定」を確認してから引き継ぎます。指示書の不備はopencodeが質問→clineが修正とAI同士で解決し、レビュー差し戻しもAI同士で再実行します（人間は最終確認のみ）。成果物なしで終了した場合ももう1つのAIが調査・解決して再実行します。進まない場合は「状態表示」で出力を確認してください。実行中は「追加指示」からPM / 実装のどちらかを指定して作業を投げられます。</div>
+        <div class="aibridge-hint collapsed" id="aibridge-hint" hidden>流れ: ①clineが指示書(.ai-bridge/instruction.md)を簡潔・短時間で作成 ②opencodeが実装→完了報告(.ai-bridge/done.md) ③clineがレビュー→OKなら人間に通知。各工程は「実行終了＋ファイル安定」を確認してから引き継ぎます。指示書の不備はopencodeが質問→clineが修正とAI同士で解決し、レビュー差し戻しもAI同士で再実行します（人間は最終確認のみ）。成果物なしで終了した場合ももう1つのAIが調査・解決して再実行します。進まない場合は「状態表示」で出力を確認してください。実行中は「追加指示」からPM / 実装のどちらかを指定して作業を投げられます。</div>
         <div id="aibridge-log" class="aibridge-log"></div>
       </div>
     </aside>
