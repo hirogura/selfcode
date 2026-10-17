@@ -27,6 +27,7 @@ window.AIBridge = (() => {
     phase: "idle", // idle | wait-instruction | wait-done | wait-review | done
     dir: "",
     task: "",
+    swapped: false, // true: opencode=PM × cline=実装 / false: cline=PM × opencode=実装
     clineId: null,
     opencodeId: null,
     pollTimer: null,
@@ -64,6 +65,17 @@ window.AIBridge = (() => {
   const autoResume = () => ($("aibridge-autoresume") ? $("aibridge-autoresume").checked : true);
   const VIS_KEY = "selfcode.aibridgeVisible";
   const RESUME_KEY = "selfcode.aibridge.autoresume";
+  const SWAP_KEY = "selfcode.aibridge.swapped";
+  // 役割マッピング: swapped=false → cline=PM / opencode=実装
+  //               swapped=true  → opencode=PM / cline=実装
+  const pmTool = () => (S.swapped ? "opencode" : "cline");
+  const devTool = () => (S.swapped ? "cline" : "opencode");
+  const pmPaneId = () => (S.swapped ? S.opencodeId : S.clineId);
+  const devPaneId = () => (S.swapped ? S.clineId : S.opencodeId);
+  const pmLabel = () => (S.swapped ? "opencode(PM)" : "cline(PM)");
+  const devLabel = () => (S.swapped ? "cline(実装)" : "opencode(実装)");
+  const roleHintText = () => (S.swapped ? "opencode(PM) × cline(実装)" : "cline(PM) × opencode(実装)");
+
   // opencode の使用制限に達したときの出力パターン（レートリミット / セッションリミット等）。
   // 429 や quota 系の文言を広めに検知する（ターミナル出力の末尾に対して判定する）。
   const LIMIT_RE = /rate[\s_\-]*limit|session[\s_\-]*limit|usage[\s_\-]*limit|too many requests|\b429\b|quota|retry after|try again later|limit (reached|exceeded|hit)|reached.{0,20}limit|exceeded.{0,20}quota|セッション.{0,10}リミット|レートリミット|使用制限|利用制限/i;
@@ -484,41 +496,49 @@ window.AIBridge = (() => {
   // ---- 各フェーズの非対話ラン ----
 
   function runClinePM() {
-    const args = autoApprove() ? [pmPrompt(S.task)] : ["--auto-approve", "false", pmPrompt(S.task)];
-    S.currentRun = { pane: "cline", kind: "pm" };
-    log("ターミナル1で cline(PM) を実行します（指示書作成）。");
-    if (!window.App.termExecIn(S.clineId, "cline", args)) {
-      toast("ターミナル1への起動に失敗しました", true);
+    const tool = pmTool();
+    const paneId = pmPaneId();
+    const args = argsForTool(tool, pmPrompt(S.task));
+    S.currentRun = { pane: tool, kind: "pm" };
+    log(`${pmPaneTag()}で ${pmLabel()} を実行します（指示書作成）。`);
+    if (!execTool(tool, paneId, args)) {
+      toast(`${pmPaneTag()}への起動に失敗しました`, true);
     }
   }
 
   function runOpencodeDev(instruction) {
     const prompt = devPrompt(instruction);
-    const args = autoApprove() ? ["run", "--auto", prompt] : ["run", prompt];
-    S.currentRun = { pane: "opencode", kind: S.lastFix ? "fix" : "dev" };
-    log("ターミナル2で opencode を実行します（実装）。");
-    if (!window.App.termExecIn(S.opencodeId, "opencode", args)) {
-      toast("ターミナル2への起動に失敗しました", true);
+    const tool = devTool();
+    const paneId = devPaneId();
+    const args = argsForTool(tool, prompt);
+    S.currentRun = { pane: tool, kind: S.lastFix ? "fix" : "dev" };
+    log(`${devPaneTag()}で ${devLabel()} を実行します（実装）。`);
+    if (!execTool(tool, paneId, args)) {
+      toast(`${devPaneTag()}への起動に失敗しました`, true);
     }
   }
 
   function runClineReview(done) {
-    const args = autoApprove() ? [reviewPrompt(done)] : ["--auto-approve", "false", reviewPrompt(done)];
-    S.currentRun = { pane: "cline", kind: "review" };
-    log("ターミナル1で cline(PM) を実行します（レビュー）。");
-    if (!window.App.termExecIn(S.clineId, "cline", args)) {
-      toast("ターミナル1への起動に失敗しました", true);
+    const tool = pmTool();
+    const paneId = pmPaneId();
+    const args = argsForTool(tool, reviewPrompt(done));
+    S.currentRun = { pane: tool, kind: "review" };
+    log(`${pmPaneTag()}で ${pmLabel()} を実行します（レビュー）。`);
+    if (!execTool(tool, paneId, args)) {
+      toast(`${pmPaneTag()}への起動に失敗しました`, true);
     }
   }
 
-  // opencodeからの指示書質問を受けて cline(PM) に修正させる（AI同士の直接やり取り）
+  // 実装側からの指示書質問を受けて PM に修正させる（AI同士の直接やり取り）
   function runClineRevise(question) {
     const prompt = pmRevisePrompt(question, S.lastInstruction || "");
-    const args = autoApprove() ? [prompt] : ["--auto-approve", "false", prompt];
-    S.currentRun = { pane: "cline", kind: "pm-revise" };
-    log("opencodeからの質問を受け、cline(PM)に指示書の修正を依頼します（AI同士で解決）。");
-    if (!window.App.termExecIn(S.clineId, "cline", args)) {
-      toast("ターミナル1への起動に失敗しました", true);
+    const tool = pmTool();
+    const paneId = pmPaneId();
+    const args = argsForTool(tool, prompt);
+    S.currentRun = { pane: tool, kind: "pm-revise" };
+    log(`実装側からの質問を受け、${pmLabel()}に指示書の修正を依頼します（AI同士で解決）。`);
+    if (!execTool(tool, paneId, args)) {
+      toast(`${pmPaneTag()}への起動に失敗しました`, true);
     }
   }
 
@@ -529,20 +549,34 @@ window.AIBridge = (() => {
     if (S.followRun && S.followRun.active && S.followRun.pane === role) {
       S.followRun.exited = true;
       S.followRun.code = code;
-      const flabel = role === "cline" ? "cline(PM)" : "opencode";
+      const flabel = role === pmTool() ? pmLabel() : devLabel();
       log(`${flabel} の追加指示の実行が終了しました (exit ${code ?? "?"})。結果を確認します。`);
       return;
     }
     if (S.currentRun && S.currentRun.pane === role) {
       S.runExited = true;
       S.exitCode = code;
-      const label = role === "cline" ? "cline(PM)" : "opencode";
+      const label = role === pmTool() ? pmLabel() : devLabel();
       log(`${label} の実行が終了しました (exit ${code ?? "?"})。成果物を確認します。`);
     }
   }
 
   // ---- プロンプト ----
 
+  function pmPaneTag() {
+    return S.swapped ? "ターミナル2" : "ターミナル1";
+  }
+  function devPaneTag() {
+    return S.swapped ? "ターミナル1" : "ターミナル2";
+  }
+  function execTool(tool, paneId, args) {
+    return window.App.termExecIn(paneId, tool, args);
+  }
+  // ツール別の自動許可引数: opencode は run --auto / cline はプロンプト追記で対応（個別責務を維持）
+  function argsForTool(tool, prompt) {
+    if (tool === "opencode") return autoApprove() ? ["run", "--auto", prompt] : ["run", prompt];
+    return autoApprove() ? [prompt + "\n\nIMPORTANT: " + AUTO_PERMIT_PROMPT] : [prompt];
+  }
   function pmPrompt(task) {
     return (
       `あなたはこのプロジェクトのPMです。簡潔に・短時間で指示書を作ってください。` +
@@ -550,7 +584,7 @@ window.AIBridge = (() => {
       `【速さの約束】\n` +
       `1. 最小限の調査だけ行い、深掘り・全体検証・テスト実行はしないでください（目安5分以内）。\n` +
       `2. 指示書は要点のみ・簡潔に（目安30行以内）。目的 / 変更対象ファイル / 手順（番号付き・最小限）/ 受け入れ条件（確認方法のみ）だけ書いてください。\n` +
-      `3. 不明点は推測で補わず「要確認」として1行で残してください（opencode側が質問してAI同士で解決します）。\n` +
+      `3. 不明点は推測で補わず「要確認」として1行で残してください（実装側が質問してAI同士で解決します）。\n` +
       `4. 「${BRIDGE}/instruction.md」を作成したら速やかに終了してください。長考・再検証は不要です。`
     );
   }
@@ -559,7 +593,7 @@ window.AIBridge = (() => {
     const q = String(question || "").slice(0, 2000);
     return (
       `あなたはPMです。簡潔に・短時間で指示書を修正してください。\n\n` +
-      `プログラマー（opencode）から指示書への質問・指摘が「${BRIDGE}/instruction-question.md」に届きました。\n` +
+      `実装担当（${devTool()}）から指示書への質問・指摘が「${BRIDGE}/instruction-question.md」に届きました。\n` +
       `【質問・指摘】\n${q}\n\n` +
       `1. 質問内容と「${BRIDGE}/instruction.md」「${BRIDGE}/task.md」を読んでください。\n` +
       `2. 指摘が正しければ instruction.md を簡潔に修正し、誤解なら質問への回答を instruction.md に1〜3行で追記してください。\n` +
@@ -590,7 +624,7 @@ window.AIBridge = (() => {
       `【完了報告の抜粋】\n${head}\n\n` +
       `1. done.md と実際の変更（git diff 等）を最小限で確認してください（深掘り・再検証は不要です）。\n` +
       `2. 問題なければ「${BRIDGE}/review-ok.md」にOKの根拠を1〜3行で書いて終了してください。\n` +
-      `3. 修正が必要なら「${BRIDGE}/instruction2.md」に具体的な追加指示を簡潔に書いて終了してください（opencodeが対応します。人間への確認は不要です）。\n` +
+      `3. 修正が必要なら「${BRIDGE}/instruction2.md」に具体的な追加指示を簡潔に書いて終了してください（実装担当が対応します。人間への確認は不要です）。\n` +
       `4. OKと修正指示の両方は書かないでください。どちらか一方だけ作成し、速やかに終了してください。`
     );
   }
@@ -611,12 +645,14 @@ window.AIBridge = (() => {
   // 空いている側宛なら「side-task」（結果ファイルで完了を検知し、人間に通知）として扱う。
 
   function followPromptFor(target, text, file, dutyNote, guardNote) {
-    const side = target === "cline" ? "PM（cline）" : "プログラマー（opencode）";
+  // target: "pm" | "dev"（役割ベース。ツール名ではない）
+    const tool = target === "pm" ? pmTool() : devTool();
+    const side = target === "pm" ? `PM（${tool}）` : `実装担当（${tool}）`;
     return (
       `AI連携の実行中に、人間からあなた（${side}）への追加指示が届きました。\n\n` +
       `【追加指示】\n${String(text || "").slice(0, 4000)}\n\n` +
       `【参考】まず「${BRIDGE}/task.md」を読んでください。` +
-      (target === "cline"
+      (target === "pm"
         ? `「${BRIDGE}/instruction.md」「${BRIDGE}/done.md」があれば合わせて読んでください。\n\n`
         : `「${BRIDGE}/instruction.md」（無ければ task.md のみ）を読んで背景を把握してください。\n\n`) +
       (dutyNote ? `【進行中の担当】\n${dutyNote}\n\n` : "") +
@@ -631,11 +667,11 @@ window.AIBridge = (() => {
 
   // 差し替え時（担当ペイン宛）に、元の担当も続けさせるための一文
   function followDutyNote(target) {
-    if (target === "cline" && S.phase === "wait-instruction")
+    if (target === "pm" && S.phase === "wait-instruction")
       return `あなたは指示書作成の担当です。追加指示への対応とあわせ、指示書「${BRIDGE}/instruction.md」の作成・更新も進めてください（指示書の完成が本来の完了条件です）。`;
-    if (target === "cline" && S.phase === "wait-review")
+    if (target === "pm" && S.phase === "wait-review")
       return `あなたはレビューの担当です。追加指示への対応とあわせ、完了報告の確認と「${BRIDGE}/review-ok.md」または「${BRIDGE}/instruction2.md」の作成も進めてください。`;
-    if (target === "opencode" && S.phase === "wait-done")
+    if (target === "dev" && S.phase === "wait-done")
       return `あなたは実装の担当です。追加指示への対応とあわせ、本来の実装作業も進め、完了したら「${BRIDGE}/done.md」を作成・更新してください（done.md の完成が本来の完了条件です）。`;
     return "";
   }
@@ -645,37 +681,38 @@ window.AIBridge = (() => {
       toast("AI連携が実行中ではありません", true);
       return;
     }
-    const target = ($("aibridge-follow-target") && $("aibridge-follow-target").value === "opencode") ? "opencode" : "cline";
+    const selVal = $("aibridge-follow-target") ? $("aibridge-follow-target").value : "pm";
+    // 新UI: pm/dev。旧UI(cline/opencode)が残っていても解釈できるようにする
+    const targetRole = (selVal === "dev" || selVal === "opencode") ? "dev" : "pm";
+    const target = targetRole === "pm" ? pmTool() : devTool();
     const text = ($("aibridge-follow-text") ? $("aibridge-follow-text").value : "").trim();
     if (!text) {
       toast("追加指示を入力してください", true);
       return;
     }
-    const paneId = target === "cline" ? S.clineId : S.opencodeId;
+    const paneId = targetRole === "pm" ? pmPaneId() : devPaneId();
     if (!paneId) {
       toast("対象のターミナルが確保されていません", true);
       return;
     }
-    const label = target === "cline" ? "cline(PM)" : "opencode";
+    const label = targetRole === "pm" ? pmLabel() : devLabel();
     const isMainPane = !!(S.currentRun && S.currentRun.pane === target && !S.runExited);
     const isFollowBusy = !!(S.followRun && S.followRun.active && S.followRun.pane === target && !S.followRun.exited);
     if (isMainPane || isFollowBusy) {
       const busyWhat = isMainPane ? "現在のフェーズの作業" : "前回の追加指示";
       if (typeof confirm === "function" && !confirm(`${label} は${busyWhat}を実行中です。追加指示を送ると現在の実行を中断します。よろしいですか？`)) return;
     }
-    const file = `follow-${target}-${Date.now().toString(36)}.md`;
+    const file = `follow-${targetRole}-${Date.now().toString(36)}.md`;
     try { await API.writeFile(bp(file), ""); } catch (e) {
       toast("結果ファイルの作成に失敗: " + (e.message || e), true);
       return;
     }
     const redirect = isMainPane; // 担当ペイン宛 = 差し替え、それ以外 = side-task
-    const dutyNote = redirect ? followDutyNote(target) : "";
+    const dutyNote = redirect ? followDutyNote(targetRole) : "";
     const guardNote = redirect ? "" : "進行中の連携フロー（他方のAIの作業・伝言ファイル）は壊さないでください。instruction.md / done.md / review-ok.md / instruction2.md は、追加指示で明示された場合を除き上書きしないでください。";
-    const prompt = followPromptFor(target, text, file, dutyNote, guardNote);
-    const args = target === "cline"
-      ? (autoApprove() ? [prompt] : ["--auto-approve", "false", prompt])
-      : (autoApprove() ? ["run", "--auto", prompt] : ["run", prompt]);
-    if (!window.App.termExecIn(paneId, target === "cline" ? "cline" : "opencode", args)) {
+    const prompt = followPromptFor(targetRole, text, file, dutyNote, guardNote);
+    const args = argsForTool(target, prompt);
+    if (!execTool(target, paneId, args)) {
       toast(`${label} への送信に失敗しました`, true);
       return;
     }
@@ -696,8 +733,8 @@ window.AIBridge = (() => {
       S.followRun = { pane: target, file, active: true, exited: false, code: null, notified: false };
       log(`${label} に追加指示を送りました。結果は ${file} に報告させます。`);
     }
-    if (target === "opencode" && S.limitResetUntil && Date.now() < S.limitResetUntil) {
-      log(`注意: opencode は使用制限の回復待ちです（解除予定 ${S.limitResetLabel || "不明"}）。制限中の実行は失敗する可能性があります。`);
+    if (S.limitResetUntil && Date.now() < S.limitResetUntil) {
+      log(`注意: 使用制限の回復待ちです（解除予定 ${S.limitResetLabel || "不明"}）。制限中の実行は失敗する可能性があります。`);
     }
     const ta = $("aibridge-follow-text");
     if (ta) ta.value = "";
@@ -707,7 +744,7 @@ window.AIBridge = (() => {
   async function pollFollow() {
     const f = S.followRun;
     if (!f || !f.active) return;
-    const label = f.pane === "cline" ? "cline(PM)" : "opencode";
+    const label = f.pane === pmTool() ? pmLabel() : devLabel();
     const content = await readText(bp(f.file));
     if (content && content.trim()) {
       S.followRun = null;
@@ -718,7 +755,7 @@ window.AIBridge = (() => {
     if (f.exited && !f.notified) {
       f.notified = true;
       S.followRun = null;
-      const tail = paneTail(f.pane === "cline" ? S.clineId : S.opencodeId, 3000).slice(-800);
+      const tail = paneTail(f.pane === pmTool() ? pmPaneId() : devPaneId(), 3000).slice(-800);
       log(`${label} の追加指示の実行が終了しましたが報告ファイルがありません。ターミナルで出力を確認してください。`);
       notifyHuman(`AI連携: ${label} の追加指示が報告なしで終了しました`, tail.slice(-300) || "出力を確認してください");
     }
@@ -749,22 +786,26 @@ window.AIBridge = (() => {
   function runTroubleshoot(kind, failedLabel, expectedName, tail) {
     const prompt = troubleshootPromptFor(kind, failedLabel, expectedName, tail);
     if (kind === "instruction" || kind === "review") {
-      // cline(PM)が失敗 → もう1つのAI=opencode に問いかける
-      S.currentRun = { pane: "opencode", kind: "troubleshoot" };
-      log(`成果物なしのため、もう1つのAI（opencode）にトラブル解決を問いかけます（${failedLabel} の失敗を調査）。`);
-      const args = autoApprove() ? ["run", "--auto", prompt] : ["run", prompt];
-      if (!window.App.termExecIn(S.opencodeId, "opencode", args)) {
-        toast("opencode への問いかけに失敗しました", true);
+      // PMが失敗 → もう1つのAI=実装側 に問いかける
+      const tool = devTool();
+      const paneId = devPaneId();
+      S.currentRun = { pane: tool, kind: "troubleshoot" };
+      log(`成果物なしのため、もう1つのAI（${devLabel()}）にトラブル解決を問いかけます（${failedLabel} の失敗を調査）。`);
+      const args = argsForTool(tool, prompt);
+      if (!execTool(tool, paneId, args)) {
+        toast(`${devLabel()} への問いかけに失敗しました`, true);
         return false;
       }
       return true;
     }
-    // opencode(実装)が失敗 → もう1つのAI=cline(PM) に問いかける
-    S.currentRun = { pane: "cline", kind: "troubleshoot" };
-    log(`成果物なしのため、もう1つのAI（cline PM）にトラブル解決を問いかけます（${failedLabel} の失敗を調査）。`);
-    const args = autoApprove() ? [prompt] : ["--auto-approve", "false", prompt];
-    if (!window.App.termExecIn(S.clineId, "cline", args)) {
-      toast("cline への問いかけに失敗しました", true);
+    // 実装側が失敗 → もう1つのAI=PM に問いかける
+    const tool = pmTool();
+    const paneId = pmPaneId();
+    S.currentRun = { pane: tool, kind: "troubleshoot" };
+    log(`成果物なしのため、もう1つのAI（${pmLabel()}）にトラブル解決を問いかけます（${failedLabel} の失敗を調査）。`);
+    const args = argsForTool(tool, prompt);
+    if (!execTool(tool, paneId, args)) {
+      toast(`${pmLabel()} への問いかけに失敗しました`, true);
       return false;
     }
     return true;
@@ -779,26 +820,26 @@ window.AIBridge = (() => {
     S.failNotified = false;
     S.phaseSince = Date.now();
     if (kind === "instruction") {
-      log("トラブル解決の結果を踏まえて cline(PM) を再実行します。");
-      S.currentRun = { pane: "cline", kind: "pm" };
+      log(`トラブル解決の結果を踏まえて ${pmLabel()} を再実行します。`);
+      S.currentRun = { pane: pmTool(), kind: "pm" };
       const base = pmPrompt(S.task);
-      const args = autoApprove() ? [base + `\n\n【前回の失敗とトラブル解決の報告】\n${hint}`] : ["--auto-approve", "false", base + `\n\n【前回の失敗とトラブル解決の報告】\n${hint}`];
-      window.App.termExecIn(S.clineId, "cline", args);
-      setStatusKeepRecover("連携中: cline(PM) が指示書を作成中…（再実行）");
+      const args = argsForTool(pmTool(), base + `\n\n【前回の失敗とトラブル解決の報告】\n${hint}`);
+      execTool(pmTool(), pmPaneId(), args);
+      setStatusKeepRecover(`連携中: ${pmLabel()} が指示書を作成中…（再実行）`);
     } else if (kind === "done") {
-      log("トラブル解決の結果を踏まえて opencode を再実行します。");
+      log(`トラブル解決の結果を踏まえて ${devLabel()} を再実行します。`);
       const prompt = devPrompt(S.lastFix || S.lastInstruction || "") + `\n\n【前回の失敗とトラブル解決の報告】\n${hint}`;
-      const args = autoApprove() ? ["run", "--auto", prompt] : ["run", prompt];
-      S.currentRun = { pane: "opencode", kind: S.lastFix ? "fix" : "dev" };
-      window.App.termExecIn(S.opencodeId, "opencode", args);
-      setStatusKeepRecover("連携中: opencode が実装中…（再実行）");
+      const args = argsForTool(devTool(), prompt);
+      S.currentRun = { pane: devTool(), kind: S.lastFix ? "fix" : "dev" };
+      execTool(devTool(), devPaneId(), args);
+      setStatusKeepRecover(`連携中: ${devLabel()} が実装中…（再実行）`);
     } else {
-      log("トラブル解決の結果を踏まえて cline(PM:レビュー) を再実行します。");
+      log(`トラブル解決の結果を踏まえて ${pmLabel()}(レビュー) を再実行します。`);
       const prompt = reviewPrompt(S.lastDone || "") + `\n\n【前回の失敗とトラブル解決の報告】\n${hint}`;
-      const args = autoApprove() ? [prompt] : ["--auto-approve", "false", prompt];
-      S.currentRun = { pane: "cline", kind: "review" };
-      window.App.termExecIn(S.clineId, "cline", args);
-      setStatusKeepRecover("連携中: cline がレビュー中…（再実行）");
+      const args = argsForTool(pmTool(), prompt);
+      S.currentRun = { pane: pmTool(), kind: "review" };
+      execTool(pmTool(), pmPaneId(), args);
+      setStatusKeepRecover(`連携中: ${pmLabel()} がレビュー中…（再実行）`);
     }
   }
 
@@ -822,41 +863,41 @@ window.AIBridge = (() => {
         return;
       }
       if (S.phase === "wait-instruction") {
-        if (limitCheck("cline(PM)", S.clineId, () => runClinePM())) return;
+        if (limitCheck(pmLabel(), pmPaneId(), () => runClinePM())) return;
         const ins = await readText(bp("instruction.md"));
         // 書きかけ拾い防止: 実行終了＋安定した内容になって初めて引き継ぐ
         if (artifactReady("instruction", ins, S.lastInstruction)) {
           S.lastInstruction = ins;
-          log("cline が指示書を作成しました。opencode に引き継ぎます。");
+          log(`${pmLabel()} が指示書を作成しました。${devLabel()} に引き継ぎます。`);
           runOpencodeDev(ins);
-          setPhase("wait-done", "連携中: opencode が実装中…");
+          setPhase("wait-done", `連携中: ${devLabel()} が実装中…`);
           return;
         }
-        await stallOrFailCheck("instruction", "cline(PM)", S.clineId, "instruction.md");
+        await stallOrFailCheck("instruction", pmLabel(), pmPaneId(), "instruction.md");
       } else if (S.phase === "wait-done") {
         // 指示書への質問はAI同士で解決する（人間には通知しない）。差し戻し相当として最優先で扱う。
         const q = await readText(bp("instruction-question.md"));
         if (artifactReady("question", q, S.lastQuestion)) {
           S.lastQuestion = q;
-          log("opencode が指示書に質問を出しました。cline に修正を依頼します（AI同士で解決）。");
+          log(`${devLabel()} が指示書に質問を出しました。${pmLabel()} に修正を依頼します（AI同士で解決）。`);
           try { await API.writeFile(bp("instruction-question.md"), ""); } catch {}
           S.stable["question"] = null;
           runClineRevise(q);
-          setPhase("wait-instruction", "連携中: cline(PM) が指示書を修正中…（AI同士で解決）");
+          setPhase("wait-instruction", `連携中: ${pmLabel()} が指示書を修正中…（AI同士で解決）`);
           return;
         }
         const done = await readText(bp("done.md"));
         if (artifactReady("done", done, S.lastDone)) {
           S.lastDone = done;
-          log("opencode が完了報告を出しました。cline にレビューを依頼します。");
+          log(`${devLabel()} が完了報告を出しました。${pmLabel()} にレビューを依頼します。`);
           runClineReview(done);
-          setPhase("wait-review", "連携中: cline がレビュー中…");
+          setPhase("wait-review", `連携中: ${pmLabel()} がレビュー中…`);
           return;
         }
-        if (limitCheck("opencode", S.opencodeId, () =>
+        if (limitCheck(devLabel(), devPaneId(), () =>
           runOpencodeDev(S.lastFix || S.lastInstruction || "")
         )) return;
-        await stallOrFailCheck("done", "opencode", S.opencodeId, "done.md");
+        await stallOrFailCheck("done", devLabel(), devPaneId(), "done.md");
       } else if (S.phase === "wait-review") {
         // 差し戻しをOKより優先する: 同じランで両方が書かれた場合も修正を確実に拾う。
         // どちらも「実行終了＋安定」ゲートを通ったものだけ受け付ける。
@@ -866,11 +907,11 @@ window.AIBridge = (() => {
         const okReady = artifactReady("review-ok", ok, S.lastReview);
         if (fixReady) {
           S.lastFix = fix;
-          log("cline が修正指示を出しました。opencode に再実行させます（AI同士で解決）。");
-          S.currentRun = { pane: "opencode", kind: "fix" };
-          const args = autoApprove() ? ["run", "--auto", fixPrompt(fix)] : ["run", fixPrompt(fix)];
-          window.App.termExecIn(S.opencodeId, "opencode", args);
-          setPhase("wait-done", "連携中: opencode が修正中…");
+          log(`${pmLabel()} が修正指示を出しました。${devLabel()} に再実行させます（AI同士で解決）。`);
+          S.currentRun = { pane: devTool(), kind: "fix" };
+          const args = argsForTool(devTool(), fixPrompt(fix));
+          execTool(devTool(), devPaneId(), args);
+          setPhase("wait-done", `連携中: ${devLabel()} が修正中…`);
           return;
         }
         if (okReady) {
@@ -879,13 +920,13 @@ window.AIBridge = (() => {
           setStatus("連携完了: 人間の確認待ち", false);
           finish();
           notifyHuman("AI連携が完了しました。人間の確認をお願いします", ok.slice(0, 300));
-          log("cline がレビューOKを出しました。人間の確認をお願いします。");
+          log(`${pmLabel()} がレビューOKを出しました。人間の確認をお願いします。`);
           return;
         }
-        if (limitCheck("cline(PM:レビュー)", S.clineId, () =>
+        if (limitCheck(`${pmLabel()}(レビュー)`, pmPaneId(), () =>
           runClineReview(S.lastDone || "")
         )) return;
-        await stallOrFailCheck("review", "cline(PM:レビュー)", S.clineId, "review-ok.md / instruction2.md");
+        await stallOrFailCheck("review", `${pmLabel()}(レビュー)`, pmPaneId(), "review-ok.md / instruction2.md");
       }
     } catch (e) {
       log("ポーリングエラー: " + (e.message || e));
@@ -915,7 +956,7 @@ window.AIBridge = (() => {
       return;
     }
     // トラブル解決側が使用制限に達した場合は回復待ち（失敗扱いにしない）
-    const troublePane = (kind === "done") ? S.clineId : S.opencodeId;
+    const troublePane = (kind === "done") ? pmPaneId() : devPaneId();
     const tail = paneTail(troublePane, 5000);
     if (isLimitHit(tail)) {
       const tinfo = currentLimitInfo(tail);
@@ -1078,8 +1119,8 @@ window.AIBridge = (() => {
     S.limitResetUntil = 0;
     S.limitResetLabel = "";
     S.limitRaw = "";
-    setPhase("wait-instruction", "連携中: cline(PM) が指示書を作成中…");
-    log(`連携開始（作業: ${S.dir || "/"} / ターミナル1:cline PM / ターミナル2:opencode 実装 / 自動承認:${autoApprove() ? "ON" : "OFF"} / リミット後自動再開:${autoResume() ? "ON" : "OFF"}）`);
+    setPhase("wait-instruction", `連携中: ${pmLabel()} が指示書を作成中…`);
+    log(`連携開始（作業: ${S.dir || "/"} / PM:${pmTool()} / 実装:${devTool()} / 自動承認:${autoApprove() ? "ON" : "OFF"} / リミット後自動再開:${autoResume() ? "ON" : "OFF"}）`);
 
     if (S.exitUnsub) { try { S.exitUnsub(); } catch {} S.exitUnsub = null; }
     if (window.App.onTermExit) S.exitUnsub = window.App.onTermExit(onExit);
@@ -1118,13 +1159,13 @@ window.AIBridge = (() => {
     S.handoffNotified = {};
     S.phaseSince = Date.now();
     if (S.phase === "wait-instruction") {
-      log("現在のフェーズ（cline:指示書作成）を再実行します。");
+      log(`現在のフェーズ（${pmLabel()}:指示書作成）を再実行します。`);
       runClinePM();
     } else if (S.phase === "wait-done") {
-      log("現在のフェーズ（opencode:実装）を再実行します。");
+      log(`現在のフェーズ（${devLabel()}）を再実行します。`);
       runOpencodeDev(S.lastFix || S.lastInstruction || "");
     } else if (S.phase === "wait-review") {
-      log("現在のフェーズ（cline:レビュー）を再実行します。");
+      log(`現在のフェーズ（${pmLabel()}:レビュー）を再実行します。`);
       runClineReview(S.lastDone || "");
     } else {
       toast("再実行できるフェーズがありません");
@@ -1134,8 +1175,54 @@ window.AIBridge = (() => {
   function diag() {
     const c = paneTail(S.clineId, 3000).slice(-600);
     const o = paneTail(S.opencodeId, 3000).slice(-600);
-    log("— ターミナル1(cline)の出力末尾 —\n" + (c || "(出力なし)"));
-    log("— ターミナル2(opencode)の出力末尾 —\n" + (o || "(出力なし)"));
+    const pmSide = S.swapped ? o : c;
+    const devSide = S.swapped ? c : o;
+    log(`— PM(${pmTool()})の出力末尾 —\n` + (pmSide || "(出力なし)"));
+    log(`— 実装(${devTool()})の出力末尾 —\n` + (devSide || "(出力なし)"));
+  }
+
+  // 役割表示（ヘッダー・ラベル・追加指示の選択肢）を現在の swapped 状態に合わせる
+  function applyRoleUI() {
+    const hint = $("aibridge-role-hint");
+    if (hint) hint.textContent = roleHintText();
+    const taskLabel = $("aibridge-task-label");
+    if (taskLabel) taskLabel.textContent = `最初の指示（${pmLabel()} に投げる内容）`;
+    const followLabel = $("aibridge-follow-label");
+    if (followLabel) followLabel.textContent = `追加指示（実行中に${pmLabel()} / ${devLabel()}へ投げる）`;
+    const sel = $("aibridge-follow-target");
+    if (sel && sel.options && sel.options.length >= 2) {
+      sel.options[0].textContent = `PM（${pmTool()}）に指示`;
+      sel.options[1].textContent = `実装（${devTool()}）に指示`;
+    }
+    const hintBox = $("aibridge-hint");
+    if (hintBox) {
+      hintBox.textContent = `流れ: ①${pmLabel()}が指示書(.ai-bridge/instruction.md)を簡潔・短時間で作成 ②${devLabel()}が実装→完了報告(.ai-bridge/done.md) ③${pmLabel()}がレビュー→OKなら人間に通知。各工程は「実行終了＋ファイル安定」を確認してから引き継ぎます。指示書の不備は${devLabel()}が質問→${pmLabel()}が修正とAI同士で解決し、レビュー差し戻しもAI同士で再実行します（人間は最終確認のみ）。成果物なしで終了した場合ももう1つのAIが調査・解決して再実行します。進まない場合は「状態表示」で出力を確認してください。実行中は「追加指示」からPM / 実装のどちらかを指定して作業を投げられます。許可の自動承認・リミット後の自動再開はどちらの担当割り当てでも有効です。`;
+    }
+    const swapBtn = $("aibridge-swap");
+    if (swapBtn) {
+      swapBtn.title = S.swapped
+        ? "PMと実装の担当を入れ替える（clineをPMに、opencodeを実装に戻す）"
+        : "PMと実装の担当を入れ替える（opencodeをPMに、clineを実装に切り替える）";
+    }
+  }
+
+  function setSwapped(next, opts) {
+    const on = !!next;
+    if (S.running && !((opts || {}).force)) {
+      toast("実行中の切り替えはできません。停止してから切り替えてください", true);
+      return false;
+    }
+    S.swapped = on;
+    try { localStorage.setItem(SWAP_KEY, on ? "1" : "0"); } catch {}
+    applyRoleUI();
+    if (!((opts || {}).silent)) {
+      log(`担当を切り替えました: ${roleHintText()}。許可の自動承認・リミット後の自動再開の設定はそのまま引き継がれます。`);
+    }
+    return true;
+  }
+
+  function toggleSwap() {
+    return setSwapped(!S.swapped, {});
   }
 
   function open() {
@@ -1190,6 +1277,13 @@ window.AIBridge = (() => {
   document.addEventListener("DOMContentLoaded", () => {
     const btnClose = $("btn-aibridge-close");
     if (btnClose) btnClose.onclick = hide;
+    const btnSwap = $("aibridge-swap");
+    if (btnSwap) btnSwap.onclick = toggleSwap;
+    try {
+      const savedSwap = localStorage.getItem(SWAP_KEY);
+      S.swapped = savedSwap === "1";
+    } catch {}
+    applyRoleUI();
     const btnStart = $("aibridge-start");
     if (btnStart) btnStart.onclick = () => { start().catch((e) => toast(e.message || String(e), true)); };
     const btnStop = $("aibridge-stop");
@@ -1231,5 +1325,5 @@ window.AIBridge = (() => {
     } catch {}
   });
 
-  return { open, close, show, hide, toggle, start, stop, resend, diag, follow: sendFollow };
+  return { open, close, show, hide, toggle, start, stop, resend, diag, follow: sendFollow, toggleSwap, isSwapped: () => S.swapped };
 })();

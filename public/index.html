@@ -13,7 +13,7 @@
   <header id="topbar">
     <div class="brand">
       <span class="logo"><svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><text x="36" y="70" font-size="52" text-anchor="middle" fill="#fff" font-family="monospace" font-weight="bold">S</text><polyline points="58,40 80,54 58,68" fill="none" stroke="#d1d5db" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-      <span class="title-wrap"><span class="title">selfcode</span><span class="version">v.2.3.1</span></span>
+      <span class="title-wrap"><span class="title">selfcode</span><span class="version">v.2.4.0</span></span>
     </div>
     <button id="btn-explorer" class="btn toggle active" title="エクスプローラの表示切替"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>
     <button id="btn-refresh" class="btn" title="リフレッシュ"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
@@ -87,15 +87,16 @@
     <div class="divider-v hidden" id="divider-aibridge" title="ドラッグで幅を調整"></div>
     <aside id="aibridge" class="aibridge hidden">
       <div class="aibridge-head">
-        <span>AI連携 <span class="hint">cline(PM) × opencode(実装)</span></span>
+        <span>AI連携 <span class="hint" id="aibridge-role-hint">cline(PM) × opencode(実装)</span></span>
         <div class="aibridge-head-actions">
+          <button id="aibridge-swap" class="btn small" title="PMと実装の担当を入れ替える（opencodeをPMに、clineを実装に切り替える）">切り替え</button>
           <button id="btn-aibridge-close" class="btn small" title="閉じる">×</button>
         </div>
       </div>
       <div class="aibridge-body">
         <div class="aibridge-status" id="aibridge-status">停止中</div>
         <div class="gh-field">
-          <label for="aibridge-task">最初の指示（cline=PM に投げる内容）</label>
+          <label for="aibridge-task" id="aibridge-task-label">最初の指示（cline=PM に投げる内容）</label>
           <textarea id="aibridge-task" class="aibridge-text" spellcheck="false" placeholder="例: TODOアプリに期限ソート機能を追加して。テストも通すこと。"></textarea>
         </div>
         <div class="gh-field">
@@ -103,7 +104,7 @@
           <input id="aibridge-dir" type="text" placeholder="例: workspace/myapp" autocomplete="off">
         </div>
         <label class="aibridge-check"><input type="checkbox" id="aibridge-autopermit" checked><span>許可を自動承認する（cline 自動承認 / opencode run --auto）</span></label>
-        <label class="aibridge-check"><input type="checkbox" id="aibridge-autoresume" checked><span>opencodeリミット後に自動再開（レートリミット / セッションリミット）</span></label>
+        <label class="aibridge-check"><input type="checkbox" id="aibridge-autoresume" checked><span>リミット後に自動再開（レートリミット / セッションリミット）</span></label>
         <div class="gh-actions">
           <button id="aibridge-start" class="btn small primary">連携開始</button>
           <button id="aibridge-stop" class="btn small danger">停止</button>
@@ -112,13 +113,13 @@
         </div>
         <div class="gh-sep" style="margin:8px 0"></div>
         <div class="gh-field" style="padding:0">
-          <label for="aibridge-follow-text">追加指示（実行中にPM / 実装へ投げる）</label>
+          <label for="aibridge-follow-text" id="aibridge-follow-label">追加指示（実行中にPM / 実装へ投げる）</label>
           <textarea id="aibridge-follow-text" class="aibridge-text aibridge-follow-text" spellcheck="false" placeholder="例: ついでにエラーハンドリングの方針も検討して。"></textarea>
         </div>
         <div class="gh-actions" style="padding:0">
           <select id="aibridge-follow-target" class="aibridge-select" title="追加指示の送り先">
-            <option value="cline">PM（cline）に指示</option>
-            <option value="opencode">実装（opencode）に指示</option>
+            <option value="pm">PMに指示</option>
+            <option value="dev">実装に指示</option>
           </select>
           <button id="aibridge-follow-send" class="btn small primary" title="選択した側のターミナルで追加指示を実行する">送信</button>
           <button id="aibridge-hint-toggle" class="btn small" title="説明の表示/非表示">▲</button>
