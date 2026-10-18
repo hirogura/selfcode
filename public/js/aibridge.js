@@ -9,6 +9,7 @@
  *   follow-<side>-*.md 実行中の人間からの追加指示に対する各AIの報告（side-task 完了検知用）
  * 各AIはプロンプトをコマンドライン引数で受けて実行し、終了する
  * （cline "prompt" / opencode run [--auto] "prompt"）。完了検知は終了通知＋ファイル安定確認。
+ * v2.4.1: cline実行時の許可自動承認で未定義だった AUTO_PERMIT_PROMPT を定義。
  * v2.3.0: 指示書は簡潔・短時間で作成し、工程の引き継ぎは「実行終了＋ファイル安定」で判定する。
  * 指示書の不備・レビュー差し戻しはAI同士で直接やり取りし、人間には最終確認のみ求める。
  */
@@ -21,6 +22,9 @@ window.AIBridge = (() => {
   // 「実行終了＋内容が安定（連続ポーリングで同一内容）＋最低文字数」を満たして初めて引き継ぐ。
   const STABLE_ROUNDS = 2;
   const MIN_ARTIFACT_LEN = 20;
+  // cline 実行時の許可自動承認を促す追記文（opencode は run --auto で対応）
+  const AUTO_PERMIT_PROMPT =
+    "You are running unattended: approve any permission/prompt requests automatically using the available approval mechanism and proceed without waiting for explicit human confirmation.";
 
   const S = {
     running: false,
