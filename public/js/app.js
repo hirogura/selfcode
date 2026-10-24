@@ -1286,6 +1286,16 @@ const App = (() => {
   // ターミナルウィンドウが開いているときは分割して新しいペインで起動する。
   // 閉じているときは分割せず、最初のサブウィンドウで起動する。
   // relPath が指定された場合は作業ディレクトリ(cwd)を設定する。
+  // AI設定パネルの「自動承認」が ON のツールは対応するオプションを付けて起動する。
+  const AI_SETTINGS_OC_AUTO_KEY = "selfcode.ocAutoApprove";
+  const AI_SETTINGS_AGY_AUTO_KEY = "selfcode.agyAutoApprove";
+
+  function toolLaunchArgs(cmd) {
+    if (cmd === "opencode" && $("ais-oc-auto") && $("ais-oc-auto").checked) return ["--auto"];
+    if (cmd === "agy" && $("ais-agy-auto") && $("ais-agy-auto").checked) return ["--dangerously-skip-permissions"];
+    return undefined;
+  }
+
   function openToolInTerminal(cmd, relPath) {
     const wasHidden = els.terminal.classList.contains("hidden");
     showTerminalPanel();
@@ -1295,7 +1305,7 @@ const App = (() => {
       const first = firstPaneIn(termState.root);
       if (!first) return;
       if (relPath !== undefined) setPaneCwd(first, relPath);
-      if (!first.running) execPane(first, cmd);
+      if (!first.running) execPane(first, cmd, toolLaunchArgs(cmd));
       focusPane(first);
       return;
     }
@@ -1303,7 +1313,7 @@ const App = (() => {
     const np = activePane();
     if (np) {
       if (relPath !== undefined) setPaneCwd(np, relPath);
-      if (!np.running) execPane(np, cmd);
+      if (!np.running) execPane(np, cmd, toolLaunchArgs(cmd));
     }
   }
 
@@ -2292,6 +2302,17 @@ const App = (() => {
       .catch(() => {});
     // AI設定パネルの表示状態を復元
     try { if (localStorage.getItem(AI_SETTINGS_KEY) === "1") showAiSettings(); } catch {}
+    // AI設定パネルの「自動承認」チェックボックス（状態の復元と保存）
+    const bindAiSettingCheck = (id, key) => {
+      const el = $(id);
+      if (!el) return;
+      try { el.checked = localStorage.getItem(key) === "1"; } catch {}
+      el.addEventListener("change", () => {
+        try { localStorage.setItem(key, el.checked ? "1" : "0"); } catch {}
+      });
+    };
+    bindAiSettingCheck("ais-oc-auto", AI_SETTINGS_OC_AUTO_KEY);
+    bindAiSettingCheck("ais-agy-auto", AI_SETTINGS_AGY_AUTO_KEY);
     $("btn-term-clear").onclick = () => { const p = activePane(); if (p && p.term) p.term.clear(); };
     $("btn-term-split").onclick = () => splitPane(activePane());
     $("btn-term-refresh").onclick = resetAndCloseTerminal;
