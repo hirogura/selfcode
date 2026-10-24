@@ -1332,6 +1332,32 @@ const App = (() => {
   let sshTempOn = false; // 「一時SSH」ボタンの状態（/api/ssh-temp と同期）
   let updateRunning = false; // アップデート実行中フラグ（二重実行を防ぐ）
 
+  // AI設定パネル（ツールバーの AI設定 ボタンで開閉。各 AI 関連設定はこのパネル内に置く）
+  const AI_SETTINGS_KEY = "selfcode.aiSettingsVisible";
+
+  function aiSettingsVisible() {
+    return !$("aisettings").classList.contains("hidden");
+  }
+
+  function showAiSettings() {
+    $("aisettings").classList.remove("hidden");
+    $("divider-aisettings").classList.remove("hidden");
+    $("btn-aisettings").classList.add("active");
+    try { localStorage.setItem(AI_SETTINGS_KEY, "1"); } catch {}
+  }
+
+  function hideAiSettings() {
+    $("aisettings").classList.add("hidden");
+    $("divider-aisettings").classList.add("hidden");
+    $("btn-aisettings").classList.remove("active");
+    try { localStorage.setItem(AI_SETTINGS_KEY, "0"); } catch {}
+  }
+
+  function toggleAiSettings() {
+    if (aiSettingsVisible()) hideAiSettings();
+    else showAiSettings();
+  }
+
   // 「一時SSH」ボタン: agy などの OAuth 認証を手元 PC から行えるよう、
   // 選択中のコンテナ（未選択ならホスト）の SSH パスワード認証を一時的に有効化する
   async function toggleSshTemp() {
@@ -1691,6 +1717,10 @@ const App = (() => {
         const w = clamp(state.startW + (state.startX - e.clientX), 280, layout.clientWidth * 0.6);
         const panel = $("aibridge");
         if (panel) panel.style.width = w + "px";
+      } else if (state.mode === "aisettings") {
+        const w = clamp(state.startW + (state.startX - e.clientX), 240, layout.clientWidth * 0.6);
+        const panel = $("aisettings");
+        if (panel) panel.style.width = w + "px";
       } else if (state.mode === "terminal") {
         const h = clamp(state.startH + (state.startY - e.clientY), TERM_H_MIN, termMaxH());
         els.terminal.style.height = h + "px";
@@ -1729,6 +1759,7 @@ const App = (() => {
     $("divider-sidebar").addEventListener("pointerdown", (e) => begin(e, "sidebar", els.sidebar));
     $("divider-github").addEventListener("pointerdown", (e) => begin(e, "github", els.github));
     $("divider-aibridge").addEventListener("pointerdown", (e) => begin(e, "aibridge", $("aibridge")));
+    $("divider-aisettings").addEventListener("pointerdown", (e) => begin(e, "aisettings", $("aisettings")));
     $("divider-chat").addEventListener("pointerdown", (e) => begin(e, "chat", els.chat));
     $("divider-terminal").addEventListener("pointerdown", (e) => begin(e, "terminal", els.terminal));
     $("divider-memo").addEventListener("pointerdown", (e) => begin(e, "memo", els.memo));
@@ -2248,6 +2279,8 @@ const App = (() => {
       else toast("AI連携モジュールが読み込まれていません", true);
     };
     $("btn-root").onclick = toggleRootMode;
+    $("btn-aisettings").onclick = toggleAiSettings;
+    $("btn-aisettings-close").onclick = hideAiSettings;
     $("btn-ssh-temp").onclick = toggleSshTemp;
     // 「一時SSH」ボタンの状態を復元
     fetch("/api/ssh-temp", { cache: "no-store" })
@@ -2257,6 +2290,8 @@ const App = (() => {
         $("btn-ssh-temp").classList.toggle("active", sshTempOn);
       })
       .catch(() => {});
+    // AI設定パネルの表示状態を復元
+    try { if (localStorage.getItem(AI_SETTINGS_KEY) === "1") showAiSettings(); } catch {}
     $("btn-term-clear").onclick = () => { const p = activePane(); if (p && p.term) p.term.clear(); };
     $("btn-term-split").onclick = () => splitPane(activePane());
     $("btn-term-refresh").onclick = resetAndCloseTerminal;
