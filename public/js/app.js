@@ -1293,7 +1293,7 @@ const App = (() => {
 
   function toolLaunchArgs(cmd) {
     if (cmd === "opencode" && $("ais-oc-auto") && $("ais-oc-auto").checked) return ["--auto"];
-    if (cmd === "freebuff" && $("ais-freebuff-auto") && $("ais-freebuff-auto").checked) return ["--auto"];
+    if (cmd === "freebuff" && $("ais-freebuff-auto") && $("ais-freebuff-auto").checked) return ["--trust-agents"];
     if (cmd === "agy" && $("ais-agy-auto") && $("ais-agy-auto").checked) return ["--dangerously-skip-permissions"];
     return undefined;
   }
