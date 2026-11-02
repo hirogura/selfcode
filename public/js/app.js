@@ -654,6 +654,8 @@ const App = (() => {
     if (!pane || typeof data !== "string" || !data) return;
     pane.log = (pane.log || "") + data;
     if (pane.log.length > TERM_LOG_MAX) pane.log = pane.log.slice(pane.log.length - TERM_LOG_MAX);
+    pane.lastDataAt = Date.now();
+    pane.waitNotified = false; // 新しい出力が来たら入力待ち通知をリセット
     for (const fn of Array.from(termDataListeners)) {
       try { fn(pane, data); } catch {}
     }
@@ -889,16 +891,22 @@ const App = (() => {
           // 再接続時に実行中のコマンド（freebuff など）を復元する
           pane.running = !!msg.cmd;
           pane.runningCmd = msg.cmd || "";
+          pane.lastDataAt = Date.now();
+          pane.waitNotified = false;
           updateFreebuffBtn();
         } else if (msg.type === "exit") {
+          const exitCmd = pane.runningCmd || "";
           pane.term.write("\r\n\x1b[90m[process exited]\x1b[0m\r\n");
           pane.running = false;
           pane.runningCmd = "";
           updateFreebuffBtn();
           notifyTermExit(pane, msg.code);
+          notifyPaneExit(pane, exitCmd, msg.code);
         } else if (msg.type === "started") {
           pane.running = true;
           pane.runningCmd = msg.cmd || "";
+          pane.lastDataAt = Date.now();
+          pane.waitNotified = false;
           updateFreebuffBtn();
           if (msg.cmd === "freebuff" || msg.cmd === "cline" || msg.cmd === "agy") {
             const label = msg.cmd === "freebuff" ? "freebuff" : msg.cmd === "cline" ? "cline" : "agy (Antigravity CLI)";
@@ -1560,6 +1568,74 @@ const App = (() => {
     for (const fn of Array.from(termExitListeners)) {
       try { fn(pane, code); } catch {}
     }
+  }
+
+  // ---- 通知表示（AI設定パネルの「通知表示」チェックボックス） ----
+  // ON のとき、AI ツール実行中に質問・承認確認など入力待ちが発生した場合や、
+  // 実行が完了（プロセス終了）した場合にブラウザの通知機能で知らせる。
+  const NOTIFY_IDLE_KEY = "selfcode.notifyOnIdle";
+  // 出力がこの時間止まったら入力待ちとみなす
+  const NOTIFY_IDLE_MS = 5000;
+  // 終了（タスク完了）通知の対象 CLI
+  const NOTIFY_AI_CMDS = new Set(["freebuff", "cline", "opencode", "agy"]);
+  // 入力待ちっぽい出力かのざっくり判定（aibridge.js の ASK/HUMAN パターンと同じ考え方）
+  const NOTIFY_WAIT_RE = /\[y\/n\]|\(y\/n\)|\[Y\/n\]|\(yes\/no\)|yes\/no|press (enter|any key)|press \[|choose (one|an option)|select (one|an option)|continue\?|proceed\?|are you sure|do you want|shall I|may I|waiting for|awaiting|needs your|require(s)? (your )?(input|approval|permission|confirmation)|permission|approval|confirm|login|sign[\s_\-]*in|承認|許可|確認が必要|続行しますか|実行しますか|よろしいですか|入力してください|選択してください|答えてください|教えてください|\?\s*$/i;
+
+  function notifyEnabled() {
+    const el = $("ais-notify");
+    return !!el && el.checked;
+  }
+
+  function stripAnsi(s) {
+    return String(s || "")
+      .replace(/\x1b\][^\x07]*\x07/g, "")
+      .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")
+      .replace(/\x1b[()][0-9A-Z]/g, "")
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "");
+  }
+
+  // ブラウザ通知を送る（通知が無効・未許可なら何もしない）
+  function browserNotify(title, body) {
+    try {
+      if (!("Notification" in window) || Notification.permission !== "granted") return;
+      const n = new Notification(title, { body: String(body || "").slice(0, 300) });
+      n.onclick = () => {
+        try { window.focus(); n.close(); } catch {}
+      };
+    } catch {}
+  }
+
+  // 定期チェック: 実行中のコマンドの出力が止まっており、出力末尾が
+  // 入力待ち（質問・確認・承認など）っぽければブラウザ通知する。
+  // 通知したら新しい出力が来るまで再通知しない。
+  function notifyIdleTick() {
+    if (!notifyEnabled()) return;
+    if ("Notification" in window && Notification.permission !== "granted") return;
+    const now = Date.now();
+    for (const p of termState.panes.values()) {
+      if (p.closed || !p.running || p.waitNotified || !p.lastDataAt) continue;
+      if (now - p.lastDataAt < NOTIFY_IDLE_MS) continue;
+      const tail = stripAnsi((p.log || "").slice(-4000)).replace(/\r/g, "");
+      const lines = tail.split("\n");
+      let hit = "";
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const t = lines[i].trim();
+        if (t && NOTIFY_WAIT_RE.test(t)) { hit = t; break; }
+      }
+      if (!hit) continue;
+      p.waitNotified = true;
+      const label = p.runningCmd ? `${p.runningCmd} が入力待ちのようです` : "ターミナルが入力待ちのようです";
+      browserNotify(label, hit.slice(-200));
+    }
+  }
+
+  // プロセス終了（タスク完了）通知
+  function notifyPaneExit(pane, cmd, code) {
+    if (pane && pane.waitNotified) pane.waitNotified = false;
+    if (!notifyEnabled() || !NOTIFY_AI_CMDS.has(cmd)) return;
+    if ("Notification" in window && Notification.permission !== "granted") return;
+    const name = cmd === "agy" ? "agy (Antigravity CLI)" : cmd;
+    browserNotify(`${name} が終了しました`, code === 0 ? "タスク完了（終了コード 0）" : `終了コード: ${code}`);
   }
 
   function paneLogTail(id, n) {
@@ -2316,6 +2392,33 @@ const App = (() => {
     bindAiSettingCheck("ais-oc-auto", AI_SETTINGS_OC_AUTO_KEY);
     bindAiSettingCheck("ais-freebuff-auto", AI_SETTINGS_FREEBUFF_AUTO_KEY);
     bindAiSettingCheck("ais-agy-auto", AI_SETTINGS_AGY_AUTO_KEY);
+    // 通知表示チェックボックス: ON にしたときに通知の許可を求める
+    bindAiSettingCheck("ais-notify", NOTIFY_IDLE_KEY);
+    const notifyCheck = $("ais-notify");
+    if (notifyCheck && "Notification" in window) {
+      notifyCheck.addEventListener("change", () => {
+        try {
+          if (!notifyCheck.checked) return;
+          if (Notification.permission === "default") {
+            Notification.requestPermission().then((perm) => {
+              if (perm !== "granted") {
+                notifyCheck.checked = false;
+                try { localStorage.setItem(NOTIFY_IDLE_KEY, "0"); } catch {}
+                toast("ブラウザ通知が許可されませんでした", true);
+              } else {
+                toast("ブラウザ通知を有効にしました");
+              }
+            }).catch(() => {});
+          } else if (Notification.permission === "denied") {
+            notifyCheck.checked = false;
+            try { localStorage.setItem(NOTIFY_IDLE_KEY, "0"); } catch {}
+            toast("ブラウザ設定で通知が拒否されています", true);
+          }
+        } catch {}
+      });
+    }
+    // 入力待ち判定の定期チェック
+    setInterval(notifyIdleTick, 2000);
     $("btn-term-clear").onclick = () => { const p = activePane(); if (p && p.term) p.term.clear(); };
     $("btn-term-split").onclick = () => splitPane(activePane());
     $("btn-term-refresh").onclick = resetAndCloseTerminal;
