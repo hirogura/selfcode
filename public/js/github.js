@@ -965,6 +965,7 @@ const GithubPanel = (() => {
       return;
     }
     box.classList.remove("hidden");
+    resetOwnRepoFilter();
     if (box.dataset.loaded) return;
     box.innerHTML = '<div class="gh-loading">読み込み中…</div>';
     try {
@@ -999,6 +1000,39 @@ const GithubPanel = (() => {
     }
   }
 
+  // 検索ボックスで自分のリポジトリ一覧を絞り込み
+  function filterOwnRepos() {
+    const box = $("gh-own");
+    if (!box.dataset.loaded) return;
+    const q = $("gh-own-search").value.trim().toLowerCase();
+    const rows = box.querySelectorAll(".gh-own-item");
+    let visible = 0;
+    for (const row of rows) {
+      const hit = !q || row.textContent.toLowerCase().includes(q);
+      row.style.display = hit ? "" : "none";
+      if (hit) visible++;
+    }
+    let msg = box.querySelector(".gh-own-filter-empty");
+    if (rows.length && !visible) {
+      if (!msg) {
+        msg = document.createElement("div");
+        msg.className = "gh-empty";
+        msg.textContent = "該当するリポジトリがありません";
+        box.appendChild(msg);
+      }
+    } else if (msg) {
+      msg.remove();
+    }
+  }
+
+  function resetOwnRepoFilter() {
+    $("gh-own-search").value = "";
+    const box = $("gh-own");
+    box.querySelectorAll(".gh-own-item").forEach((row) => { row.style.display = ""; });
+    const msg = box.querySelector(".gh-own-filter-empty");
+    if (msg) msg.remove();
+  }
+
   function init() {
     loadCollapsedRepos();
     $("btn-github").onclick = toggle;
@@ -1013,6 +1047,7 @@ const GithubPanel = (() => {
     $("gh-add-toggle").onclick = () => $("gh-add").classList.toggle("hidden");
     $("gh-clone").onclick = cloneRepo;
     $("gh-own-toggle").onclick = toggleOwnRepos;
+    $("gh-own-search").addEventListener("input", filterOwnRepos);
     $("gh-register-existing").onclick = registerExisting;
     $("gh-repos-collapse").onclick = collapseAllRepos;
     $("gh-repos-refresh").onclick = renderRepos;

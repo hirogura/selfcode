@@ -732,6 +732,20 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
 }
 .gh-tpl-text:focus { border-color: var(--accent-2); }
 .gh-add-actions { display: flex; gap: 6px; padding: 8px 10px 0; }
+.gh-add-actions .btn { flex: 0 0 auto; }
+.gh-add-actions input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: var(--fg);
+  outline: none;
+  font-size: 12px;
+  font-family: var(--mono);
+}
+.gh-add-actions input:focus { border-color: var(--accent-2); }
 .gh-own {
   margin: 8px 10px 0;
   border: 1px solid var(--border);
