@@ -19,6 +19,8 @@ Environment=HOME=/root
 # Environment=SELFCODE_USERNAME=admin
 # Environment=OPENCODE_SERVER_PASSWORD=change-me
 # Environment=OPENCODE_BIN=/root/.opencode/bin/opencode
+# beacon.sh (Agent Beacon) のデータ置き場（AI設定パネルの beacon.sh カードで管理する。変える場合は値を書き換える）
+Environment=BEACON_DATA_DIR=/opt/lxd-data/beacon
 # Antigravity CLI (agy) は ~/.local/bin にインストールされるため PATH に追加しておく
 Environment=PATH=/root/.opencode/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
 

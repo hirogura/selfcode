@@ -21,6 +21,8 @@ set -euo pipefail
 REPO_URL="${SELFCODE_REPO_URL:-https://github.com/hirogura/selfcode.git}"
 BRANCH="main"
 DEFAULT_DIR="/opt/lxd-data/selfcode"
+# beacon.sh (Agent Beacon) のデータ置き場。BEACON_DATA_DIR 環境変数で上書き可（sudo -E で引き継ぎ）
+BEACON_DATA_DIR="${BEACON_DATA_DIR:-/opt/lxd-data/beacon}"
 
 # ---- 引数解析 ----
 INSTALL_DIR="$DEFAULT_DIR"
@@ -132,8 +134,26 @@ if [ -d /etc/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
   maybe_sudo systemctl daemon-reload
   maybe_sudo systemctl enable --now selfcode
   info "selfcode サービスを起動しました"
+  # beacon.sh (Agent Beacon) のデータ置き場（BEACON_DATA_DIR）をユニットにも反映する
+  # （既存環境への上書きインストール時はユニットが古い場合があるため、無ければ追記する）
+  if ! grep -q '^Environment=BEACON_DATA_DIR=' /etc/systemd/system/selfcode.service 2>/dev/null; then
+    info "BEACON_DATA_DIR を selfcode.service に追記中..."
+    maybe_sudo sh -c "printf 'Environment=BEACON_DATA_DIR=%s\n' '$BEACON_DATA_DIR' >> /etc/systemd/system/selfcode.service"
+    maybe_sudo systemctl daemon-reload
+  fi
 else
   warn "systemd が見つかりません。手動起動は README.md を参照してください。"
+fi
+
+# ---- beacon.sh (Agent Beacon) のデータ置き場と環境変数の準備 ----
+# beacon CLI 自体は selfcode アプリ上の「AI設定 → beacon.sh」カードからオンデマンドで
+# インストールできるため、ここでは収集データの置き場作成と環境変数の永続化のみ行う。
+maybe_sudo mkdir -p "$BEACON_DATA_DIR"
+info "beacon.sh データ置き場を確保しました: $BEACON_DATA_DIR"
+# /etc/environment に永続化（systemd / シェルの両方で BEACON_DATA_DIR を参照できるようにする）
+if [ -d /etc ] && ! grep -q '^BEACON_DATA_DIR=' /etc/environment 2>/dev/null; then
+  info "BEACON_DATA_DIR を /etc/environment に永続化中..."
+  maybe_sudo sh -c "printf 'BEACON_DATA_DIR=%s\n' '$BEACON_DATA_DIR' >> /etc/environment"
 fi
 
 # ---- Tailscale serve（自動設定） ----
@@ -178,6 +198,7 @@ cat <<EOF
  ポート         : 3339 (PORT 環境変数で変更可)
 $BROWSER_LINE
 $SCOPE_LINE$SERVE_HINT
+ beacon データ  : $BEACON_DATA_DIR (BEACON_DATA_DIR)
 
  ログ           : journalctl -u selfcode -f
  停止/再起動    : sudo systemctl stop|restart selfcode

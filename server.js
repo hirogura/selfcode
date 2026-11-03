@@ -34,6 +34,12 @@ const SELF_PASS = process.env.SELFCODE_PASSWORD || "";
 const OC_USER = process.env.OPENCODE_SERVER_USERNAME || "opencode";
 const OC_PASS = process.env.OPENCODE_SERVER_PASSWORD || "";
 const OC_BIN_RAW = process.env.OPENCODE_BIN || "opencode";
+// beacon.sh (Agent Beacon): AIコーディングエージェントの共通記憶層。
+// 収集データの置き場と CLI の所在は環境変数で上書きできる（既定は /opt/lxd-data/beacon）。
+const BEACON_DATA_DIR = process.env.BEACON_DATA_DIR || "/opt/lxd-data/beacon";
+const BEACON_BIN_RAW = process.env.BEACON_BIN || "beacon";
+const BEACON_HARNESSES = process.env.BEACON_HARNESSES || "opencode,claude,codex,cline";
+const BEACON_SERVICE = process.env.BEACON_COLLECTOR_SERVICE || "beacon-collector";
 const MEMO_FILE = process.env.SELFCODE_MEMO || "/opt/lxd-data/note/selfcode/selfcode-memo.md";
 const RESTART_CMD = process.env.SELFCODE_RESTART_CMD || "systemctl restart selfcode";
 const UPDATE_TIMEOUT_MS = Number(process.env.SELFCODE_UPDATE_TIMEOUT || 900000); // アップデートのタイムアウト（既定 15 分）
@@ -114,6 +120,15 @@ try {
   fs.mkdirSync(process.env.HOME, { recursive: true });
 } catch (e) {
   console.error(`[selfcode] HOME を作成できませんでした: ${process.env.HOME} (${e.message})`);
+}
+
+// beacon.sh のデータ置き場（BEACON_DATA_DIR）を確保しておく。
+// プロセス全体の環境にも設定しておくことで、ターミナルで動く beacon CLI / AI ハーネスにも伝わる。
+if (!process.env.BEACON_DATA_DIR) process.env.BEACON_DATA_DIR = BEACON_DATA_DIR;
+try {
+  fs.mkdirSync(BEACON_DATA_DIR, { recursive: true });
+} catch (e) {
+  console.error(`[selfcode] BEACON_DATA_DIR を作成できませんでした: ${BEACON_DATA_DIR} (${e.message})`);
 }
 
 const app = express();
@@ -353,6 +368,266 @@ app.get("/api/opencode/check", (req, res) => {
   const termHome = TERM_USER ? userHomeOf(TERM_USER) : null;
   const installed = !!findBin("opencode", process.env.PATH || "", termHome);
   res.json({ installed });
+});
+
+// ================= beacon.sh（AIエージェントの共通記憶層） =================
+// Agent Beacon (beacon.sh) は opencode / Claude Code / Codex など 20+ ハーネスの
+// セッションを集約する記憶層。CLI は公式リリースの install.sh から導入し、収集データの
+// 置き場は BEACON_DATA_DIR（ローカルファースト）で管理する。ハーネスの計測設定は
+// beacon endpoint install --harness <BEACON_HARNESSES> で行う。
+
+// runCmd と違い終了コードを問わず出力を返す（systemctl is-active の "inactive" 判定などで使う）
+function runOut(bin, args, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const out = [];
+    const err = [];
+    const to = setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch {}
+      reject(new Error("command timed out"));
+    }, timeoutMs || 8000);
+    child.stdout.on("data", (d) => out.push(d));
+    child.stderr.on("data", (d) => err.push(d));
+    child.on("error", (e) => { clearTimeout(to); reject(e); });
+    child.on("close", (code) => {
+      clearTimeout(to);
+      resolve({ code, out: Buffer.concat(out).toString("utf8"), err: Buffer.concat(err).toString("utf8") });
+    });
+  });
+}
+
+// BEACON_BIN（既定 "beacon"）を解決する。絶対パス指定ならその実体を確認。
+function beaconBinPath() {
+  if (path.isAbsolute(BEACON_BIN_RAW)) {
+    try {
+      fs.accessSync(BEACON_BIN_RAW, fs.constants.X_OK);
+      return BEACON_BIN_RAW;
+    } catch {
+      return null;
+    }
+  }
+  const termHome = TERM_USER ? userHomeOf(TERM_USER) : null;
+  return findBin(BEACON_BIN_RAW, process.env.PATH || "", termHome);
+}
+
+// beacon CLI / エンドポイント用の実行環境（BEACON_DATA_DIR と tarball 導入場所の PATH 追加。
+// 接続ユーザーの D-Bus / XDG_RUNTIME_DIR / キーリングも引き継ぐ（systemctl --user 用）
+function beaconEnv() {
+  const env = { ...process.env, BEACON_DATA_DIR };
+  const home = process.env.HOME || os.homedir();
+  for (const dir of [`${home}/.local/bin`, "/opt/beacon/bin", "/usr/local/bin"]) {
+    if (fs.existsSync(dir) && !String(env.PATH || "").split(":").includes(dir)) env.PATH = `${dir}:${env.PATH}`;
+  }
+  const uid = process.getuid ? process.getuid() : 0;
+  const runUserDir = `/run/user/${uid}`;
+  if (fs.existsSync(runUserDir)) {
+    if (!env.XDG_RUNTIME_DIR) env.XDG_RUNTIME_DIR = runUserDir;
+    if (!env.DBUS_SESSION_BUS_ADDRESS && fs.existsSync(`${runUserDir}/bus`)) {
+      env.DBUS_SESSION_BUS_ADDRESS = `unix:path=${runUserDir}/bus`;
+    }
+    if (!env.GNOME_KEYRING_CONTROL && fs.existsSync(`${runUserDir}/keyring`)) {
+      env.GNOME_KEYRING_CONTROL = `${runUserDir}/keyring`;
+    }
+  }
+  return env;
+}
+
+// beacon-collector（エンドポイントの systemd サービス）の状態取得
+async function beaconServiceInfo() {
+  if (!fs.existsSync("/run/systemd/system")) {
+    return { name: BEACON_SERVICE, available: false, active: false, state: null };
+  }
+  try {
+    const r = await runOut("systemctl", ["is-active", BEACON_SERVICE], 5000);
+    const state = (r.out || "").trim().split("\n").filter(Boolean).pop() || "unknown";
+    return { name: BEACON_SERVICE, available: true, active: state === "active", state };
+  } catch (e) {
+    return { name: BEACON_SERVICE, available: true, active: false, state: "unknown", error: e.message };
+  }
+}
+
+// オンデマンドインストールの進捗管理（UI からロック取得 → バックグラウンド実行 → status でポーリング）
+const beaconInstall = { running: false, startedAt: null, finishedAt: null, ok: null, log: [], child: null };
+const BEACON_INSTALL_LOG_MAX = 200;
+
+function beaconLogPush(chunk) {
+  for (const line of String(chunk || "").split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    beaconInstall.log.push(line.slice(0, 500));
+  }
+  if (beaconInstall.log.length > BEACON_INSTALL_LOG_MAX) {
+    beaconInstall.log.splice(0, beaconInstall.log.length - BEACON_INSTALL_LOG_MAX);
+  }
+}
+
+function finishBeaconInstall(ok) {
+  beaconInstall.running = false;
+  beaconInstall.ok = ok;
+  beaconInstall.finishedAt = Date.now();
+  beaconInstall.child = null;
+  console.log(`[selfcode] beacon install ${ok ? "finished" : "failed"}`);
+}
+
+// beacon CLI の導入手順（公式 install.sh が apt/dnf/yum 系専用のため、非対応ディストロ
+// （Arch/CachyOS 等）では tarball から ~/.local/bin に導入する）。1要素 = 1文として
+// 定義しており、API 用は改行結合、ターミナルの確認フロー用は "; " で結合して使い回す。
+const BEACON_TARBALL_STEPS = [
+  "b_ver=\"$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/asymptote-labs/agent-beacon/releases/latest)\"",
+  "b_ver=\"${b_ver##*/}\"",
+  "b_ver=\"${b_ver#v}\"",
+  "case \"$(uname -m)\" in x86_64|amd64) b_arch=amd64 ;; aarch64|arm64) b_arch=arm64 ;; *) echo \"[selfcode] 未対応のCPUアーキテクチャです: $(uname -m)\" >&2; exit 1 ;; esac",
+  "b_dir=\"$(mktemp -d)\"",
+  "cd \"$b_dir\" || exit 1",
+  "curl -fsSL -o \"beacon_${b_ver}_linux_${b_arch}.tar.gz\" \"https://github.com/asymptote-labs/agent-beacon/releases/download/v${b_ver}/beacon_${b_ver}_linux_${b_arch}.tar.gz\"",
+  "curl -fsSL -o checksums.txt \"https://github.com/asymptote-labs/agent-beacon/releases/download/v${b_ver}/checksums.txt\"",
+  "grep \"beacon_${b_ver}_linux_${b_arch}.tar.gz\" checksums.txt | sha256sum -c - || echo \"[selfcode] checksums.txt の検証に失敗しました（このまま進めます）\"",
+  "tar -xzf \"beacon_${b_ver}_linux_${b_arch}.tar.gz\"",
+  "mkdir -p \"$HOME/.local/bin\"",
+  "for b_bin in beacon beacon-hooks beacon-otelcol; do if [ -f \"$b_bin\" ]; then mv -f \"$b_bin\" \"$HOME/.local/bin/\"; fi; done",
+  "echo \"[selfcode] beacon ${b_ver} を $HOME/.local/bin に導入しました\"",
+];
+
+// ハーネス計測（エンドポイント）の設定。user scope bus の無い環境（コンテナ等）では
+// user モードで失敗するため、root / sudo なら --system で再試行する。
+// $B には先行して解決した beacon CLI の絶対パス（無ければ "beacon"）が入っている。
+const BEACON_ENDPOINT_STEP =
+  "if ! \"$B\" endpoint install --harness '" + BEACON_HARNESSES + "'; then " +
+  "echo '[selfcode] user モードでの設定に失敗したため、--system で再試行します…'; " +
+  "if [ \"$(id -u)\" = \"0\" ]; then \"$B\" endpoint install --harness '" + BEACON_HARNESSES + "' --system || echo '[selfcode] beacon endpoint install に失敗しました（beacon endpoint doctor で確認できます）'; " +
+  "else sudo -n \"$B\" endpoint install --harness '" + BEACON_HARNESSES + "' --system || echo '[selfcode] beacon endpoint install に失敗しました（beacon endpoint doctor で確認、または手動で再試行してください）'; fi; fi";
+
+// インストールスクリプト（公式 install.sh → tarball フォールバック → beacon endpoint install）。
+// 改行区切りの配列を sh -c に渡すため、各行は単一引用符の中で完結させて書くこと。
+function buildBeaconInstallScript() {
+  return [
+    "set -e",
+    "export BEACON_DATA_DIR=" + shq(BEACON_DATA_DIR),
+    "export PATH=\"$HOME/.local/bin:/opt/beacon/bin:/usr/local/bin:$PATH\"",
+    "echo '[selfcode] beacon.sh (Agent Beacon) のインストールを開始します…'",
+    "if ! command -v beacon >/dev/null 2>&1; then",
+    "echo '[selfcode] 公式インストーラ（.deb/.rpm）を試します…'",
+    "curl -fsSL https://github.com/asymptote-labs/agent-beacon/releases/latest/download/install.sh | bash || true",
+    "fi",
+    "if ! command -v beacon >/dev/null 2>&1; then",
+    "echo '[selfcode] パッケージマネージャが非対応のため tarball からインストールします…'",
+    ...BEACON_TARBALL_STEPS,
+    "fi",
+    "if command -v beacon >/dev/null 2>&1; then",
+    // sudo は PATH をリセットするため、CLI は絶対パス（解決できないなら beacon）で呼ぶ
+    "B=\"$(command -v beacon || echo beacon)\"",
+    "$B version",
+    "echo '[selfcode] エンドポイント（ハーネス計測）を設定します…'",
+    BEACON_ENDPOINT_STEP,
+    "if command -v systemctl >/dev/null 2>&1; then",
+    "echo \"[selfcode] beacon-collector サービス: $(systemctl is-active beacon-collector 2>/dev/null || echo 不明)\"",
+    "fi",
+    "echo '[selfcode] インストールが完了しました'",
+    "else",
+    "echo '[selfcode] beacon CLI が見つかりません。インストールに失敗した可能性があります' >&2",
+    "exit 1",
+    "fi",
+  ].join("\n");
+}
+
+function startBeaconInstall() {
+  if (beaconInstall.running) return;
+  beaconInstall.running = true;
+  beaconInstall.startedAt = Date.now();
+  beaconInstall.finishedAt = null;
+  beaconInstall.ok = null;
+  beaconInstall.log = [];
+  console.log("[selfcode] beacon install started");
+  const child = spawn("bash", ["-c", buildBeaconInstallScript()], {
+    env: beaconEnv(),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  beaconInstall.child = child;
+  child.stdout.on("data", (d) => beaconLogPush(d));
+  child.stderr.on("data", (d) => beaconLogPush(d));
+  child.on("error", (e) => {
+    beaconLogPush("[selfcode] インストールの起動に失敗しました: " + e.message);
+    finishBeaconInstall(false);
+  });
+  child.on("close", (code) => {
+    if (code === 0) {
+      beaconLogPush("[selfcode] インストールが完了しました。AI設定パネルの「状態更新」で反映されます");
+      finishBeaconInstall(true);
+    } else {
+      beaconLogPush(`[selfcode] インストールに失敗しました (exit ${code})`);
+      finishBeaconInstall(false);
+    }
+  });
+}
+
+async function beaconStatus() {
+  const bin = beaconBinPath();
+  const installed = !!bin;
+  let version = null;
+  let versionError = null;
+  if (installed) {
+    try {
+      const r = await runOut(bin, ["version"], 8000);
+      version = ((r.out || "") + (r.err || "")).trim().split("\n").filter(Boolean)[0] || null;
+    } catch (e) {
+      versionError = e.message;
+    }
+  }
+  return {
+    installed,
+    binPath: bin,
+    version,
+    versionError,
+    harnesses: BEACON_HARNESSES,
+    dataDir: { path: BEACON_DATA_DIR, exists: fs.existsSync(BEACON_DATA_DIR) },
+    service: await beaconServiceInfo(),
+    install: {
+      running: beaconInstall.running,
+      ok: beaconInstall.ok,
+      startedAt: beaconInstall.startedAt,
+      finishedAt: beaconInstall.finishedAt,
+      log: beaconInstall.log.slice(-40).join("\n"),
+    },
+  };
+}
+
+// beacon.sh の状態（インストール有無・バージョン・サービス・インストール進捗）
+app.get("/api/beacon/status", async (req, res, next) => {
+  try {
+    res.json(await beaconStatus());
+  } catch (e) {
+    next(e);
+  }
+});
+
+// beacon-collector サービス（エンドポイントの常駐プロセス）の再起動
+app.post("/api/beacon/restart", async (req, res, next) => {
+  try {
+    if (!beaconBinPath()) {
+      return res.status(400).json({ error: "beacon がインストールされていません。「AI設定」の「インストール」ボタンから導入してください" });
+    }
+    const svc = await beaconServiceInfo();
+    if (!svc.available) {
+      return res.status(500).json({ error: `systemd が利用できないため ${BEACON_SERVICE} を再起動できません` });
+    }
+    console.log("[selfcode] beacon collector restart requested");
+    // サービス操作は root 権限が必要。systemd 管理下の selfcode は root で動くため通常は直接、
+    // user 実行時は password-less sudo で再試行する（sudo -n なので対話待ちはしない）。
+    await runCmd(IS_ROOT ? "systemctl" : "sudo", IS_ROOT ? ["restart", BEACON_SERVICE] : ["-n", "systemctl", "restart", BEACON_SERVICE], 60000);
+    const after = await beaconServiceInfo();
+    res.json({ ok: true, service: after });
+  } catch (e) {
+    if (res.headersSent) return next(e);
+    res.status(500).json({ error: `${BEACON_SERVICE} の再起動に失敗しました: ${e.message}` });
+  }
+});
+
+// オンデマンドインストール（バックグラウンド実行。進捗は /api/beacon/status で取得）
+app.post("/api/beacon/install", (req, res) => {
+  if (beaconInstall.running) {
+    return res.status(409).json({ error: "beacon のインストールが進行中です" });
+  }
+  startBeaconInstall();
+  res.json({ ok: true });
 });
 
 // ================= 一時SSH（agy などの OAuth 認証を手元 PC から行えるようにする） =================
@@ -2205,6 +2480,13 @@ function findBin(name, pathStr, extraHome) {
     for (const h of homes) candidates.push(path.join(h, ".local/bin/agy"));
     candidates.push("/usr/local/bin/agy", "/usr/bin/agy");
   }
+  // beacon.sh (Agent Beacon) の CLI。deb/rpm 経由では /usr/local/bin に、
+  // tarball 経由では ~/.local/bin または /opt/beacon/bin に置かれる。
+  if (name === "beacon") {
+    const homes = [process.env.HOME || os.homedir(), extraHome].filter(Boolean);
+    for (const h of homes) candidates.push(path.join(h, ".local/bin/beacon"));
+    candidates.push("/usr/local/bin/beacon", "/opt/beacon/bin/beacon", "/usr/bin/beacon");
+  }
   for (const c of candidates) {
     try {
       fs.accessSync(c, fs.constants.X_OK);
@@ -2250,6 +2532,16 @@ const INSTALL_CMDS = {
       'if [ "$(id -u)" = "0" ]; then npm install -g cline; else sudo npm install -g cline; fi',
   agy:
     'export PATH="$HOME/.local/bin:$PATH"; curl -fsSL https://antigravity.google/cli/install.sh | bash; if [ "$(id -u)" = "0" ] && [ -f /root/.local/bin/agy ]; then cp -f /root/.local/bin/agy /usr/local/bin/agy 2>/dev/null && chmod 755 /usr/local/bin/agy 2>/dev/null || true; fi',
+  // beacon.sh (Agent Beacon) は公式リリースの install.sh から導入する（systemd 環境では
+  // .deb/.rpm が beacon-collector サービスまで構成する）。非対応ディストロでは tarball で導入。
+  // BEACON_TARBALL_STEPS / BEACON_ENDPOINT_STEP（beacon.sh 管理セクションで定義）を使い回す。
+  beacon: [
+    "export PATH=\"$HOME/.local/bin:/opt/beacon/bin:/usr/local/bin:$PATH\"",
+    ...BEACON_TARBALL_STEPS,
+    "B=\"$(command -v beacon || echo beacon)\"",
+    "$B version",
+    BEACON_ENDPOINT_STEP,
+  ].join("; "),
 };
 
 // コンテナ内でコマンドを実行するための CLI 引数（tty: ターミナル用に疑似端末を割り当てる）
@@ -2783,10 +3075,13 @@ wss.on("connection", (ws, req) => {
       "    echo '[selfcode] インストールを開始します…'",
       "    " + installCmd,
       "    if command -v " + cmd + " >/dev/null 2>&1; then",
-      "      echo '[selfcode] インストールが完了しました。" + cmd + " を起動します…'",
-      "      exec " + cmd,
-      "    fi",
+      // beacon は常駐エージェントではないためインストール後に CLI を起動せず、シェルに戻す
+      cmd === "beacon"
+        ? "      echo '[selfcode] インストールが完了しました。beacon-collector サービスの状態は「AI設定」の beacon.sh カードで確認できます'"
+        : "      echo '[selfcode] インストールが完了しました。" + cmd + " を起動します…'\n      exec " + cmd,
+      "    else",
       "    echo '[selfcode] インストールに失敗しました。もう一度お試しください'",
+      "    fi",
       "    ;;",
       "  *)",
       "    echo '[selfcode] インストールをスキップしました'",

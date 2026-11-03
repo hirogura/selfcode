@@ -151,6 +151,18 @@
           <label class="aibridge-check"><input type="checkbox" id="ais-agy-auto"><span>自動承認（--dangerously-skip-permissions 付きで起動）</span></label>
         </div>
         <div class="gh-section">
+          <div class="gh-sec-head"><span>beacon.sh（記憶層管理）</span></div>
+          <div class="gh-status" id="ais-beacon-status">読み込み中…</div>
+          <div class="gh-actions">
+            <button id="btn-beacon-refresh" class="btn small" title="beacon.sh の状態を再取得する">状態更新</button>
+            <button id="btn-beacon-restart" class="btn small" title="beacon-collector（エンドポイントの常駐サービス）を再起動">再起動</button>
+            <button id="btn-beacon-folder" class="btn small" title="記憶データフォルダ (BEACON_DATA_DIR) をエクスプローラで開く">記憶フォルダを開く</button>
+            <button id="btn-beacon-install" class="btn small primary" title="beacon.sh (Agent Beacon) をインストールする">インストール</button>
+          </div>
+          <pre id="ais-beacon-log" class="beacon-log" hidden></pre>
+          <div class="gh-status" id="ais-beacon-hint">beacon.sh (Agent Beacon) は opencode / Claude Code / Codex など 20+ の AI コーディングセッションをローカルに集約する共通記憶層です。「インストール」で CLI とエンドポイントを導入し、セッション記録を BEACON_DATA_DIR（ローカルファースト）に収集します。</div>
+        </div>
+        <div class="gh-section">
           <div class="gh-sec-head"><span>一時SSH</span></div>
           <div class="gh-actions">
             <button id="btn-ssh-temp" class="btn toggle" title="agy の認証用に SSH のパスワード認証・root ログインを一時的に有効化（もう一度押すと解除）">一時SSH</button>

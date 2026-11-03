@@ -9,6 +9,7 @@ code-server のようにブラウザから使えて、opencodeやFreebuff、Goog
 - **opencode / freebuff / agy (Antigravity CLI)** ボタンでターミナルを分割して CLI を起動（未インストールなら確認して自動インストール）
 - **一時SSH** ボタンで、agy などの OAuth 認証を手元 PC から行えるよう SSH のパスワード認証・root ログインを一時的に有効化（もう一度押すと解除）
 - **通知表示**（AI設定パネル）チェックボックスで、AI ツールのタスク完了時や質問・承認確認など入力待ちの発生時にブラウザ通知
+- **beacon.sh (Agent Beacon) 連携**（AI設定パネルの beacon.sh カード）： opencode / Claude Code / Codex など 20+ ハーネスのセッションをローカルに集約する共通記憶層。状態表示・再起動・記憶フォルダを開く・オンデマンドインストールが UI から可能
 - **LXD / Docker コンテナ連携**（コンテナ内のファイル操作・ターミナル）
 - **GitHub 連携**（ユーザー名・トークンの保存、リポジトリのクローン登録、status / fetch / pull / ログ表示）
 - opencode サーバーはバックエンドが自動起動し、`/opencode/*` でプロキシ（認証情報はブラウザに触れない）
@@ -40,6 +41,7 @@ sudo bash /tmp/install-selfcode.sh
 
 - 既定のインストール先は `/opt/lxd-data/selfcode`（第1引数で変更可: `sudo bash install-selfcode.sh /srv/selfcode`）
 - `opencode` / `freebuff` / Antigravity CLI (`agy`) が未導入の場合は、ターミナル上のボタンから確認のうえインストールできます（Enter または `y` で進む。スクリプト自体は CLI を導入しません）
+- beacon.sh (Agent Beacon) 用のデータ置き場 `/opt/lxd-data/beacon`（`BEACON_DATA_DIR`）を自動作成し、`/etc/environment` と `selfcode.service` に永続化します。CLI 自体は「AI設定 → beacon.sh」カードからオンデマンドでインストールできます（スクリプト自体は beacon を導入しません）
 - systemd サービス `selfcode.service` の登録・自動起動も行います
 - **Tailscale を導入済みなら、確認のうえ `tailscale serve` で Tailnet 内のみに公開**します（完了メッセージにアクセス URL を表示）
 - 確認をすべてスキップするには `-y` を付けて実行: `sudo bash install-selfcode.sh -y`
@@ -64,6 +66,10 @@ sudo npm install -g freebuff
 
 # Antigravity CLI（公式インストーラ。~/.local/bin/agy に導入される）
 curl -fsSL https://antigravity.google/cli/install.sh | bash
+
+# beacon.sh（※オプション。「AI設定 → beacon.sh」カードからインストールするのが推奨。
+# .deb/.rpm が systemd 環境では beacon-collector サービスまで構成される）
+curl -fsSL https://github.com/asymptote-labs/agent-beacon/releases/latest/download/install.sh | bash
 ```
 
 ## 起動
@@ -95,6 +101,9 @@ PORT=3339 npm start
 | `SELFCODE_REPO_URL` | `https://github.com/hirogura/selfcode.git` | インストールスクリプトが clone するリポジトリ（フォーク運用時のみ上書き。`SELFCODE_REPO_URL=... sudo -E bash install-selfcode.sh`） |
 | `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD` | `opencode` / 自動生成 | opencode サーバーの認証 |
 | `OPENCODE_BIN` | `opencode` | opencode バイナリのパス |
+| `BEACON_DATA_DIR` | `/opt/lxd-data/beacon` | beacon.sh (Agent Beacon) の記憶データ置き場。ターミナルで動く AI CLI にも引き継がれる |
+| `BEACON_BIN` | `beacon` | beacon CLI バイナリのパス（絶対パス指定可） |
+| `BEACON_HARNESSES` | `opencode,claude,codex,cline` | beacon のエンドポイント設定で計測するハーネス（`beacon endpoint install --harness` の引数） |
 
 ## systemd で常駐させる
 
@@ -142,6 +151,12 @@ sudo tailscale serve --bg --https=3339 http://127.0.0.1:3339
   - 手元 PC から `ssh -L <ポート>:localhost:<ポート> root@<IP>` でコンテナへポートを転送し、接続したら `agy` と入力して認証 URL を確認、手元 PC のブラウザで認証（Tailscale 利用時はマジックDNS名 `root@<ホスト名>` でも接続可能。手順は ON 時にターミナルへ案内表示）
   - 認証完了後、もう一度ボタンを押して **OFF** にすると、バックアップした sshd 設定と root パスワードを復元
 - **AI設定** パネルの **通知表示** チェックボックスを ON にすると、ターミナルの AI ツール（opencode / freebuff / cline / agy）が質問・承認確認などで入力待ちになったときや実行が完了したときに**ブラウザ通知**でお知らせ（チェックを入れると通知の許可を求めます）
+- **AI設定** パネルの **beacon.sh（記憶層管理）** カードで、AI エージェントの共通記憶層 (beacon.sh / Agent Beacon) を管理
+  - **状態更新**： バージョン・beacon-collector サービスの稼働状態・記憶データ置き場を表示
+  - **再起動**： beacon-collector サービス（エンドポイントの常駐プロセス）を再起動
+  - **記憶フォルダを開く**: `BEACON_DATA_DIR`（既定 `/opt/lxd-data/beacon`）をエクスプローラで開く
+  - **インストール**: 公式リリースから CLI を導入し、opencode / claude / codex / cline のセッション記録をローカルに収集するよう設定（進捗は同カードのログ表示に流れます）
+  - ターミナルの AI ツールボタンから `beacon` を起動しようとした場合も、未導入なら確認のうえ自動インストールします
 - EXPLORER のフォルダ（またはファイル）を右クリック → **ここで freebuff** で、そのフォルダをワークスペースとして freebuff を起動
 - 下の **ターミナル**（Ctrl+J）で `opencode` CLI などを実行
   - **分割**ボタンでペインを分割（フォーカス中のターミナルのフォルダを引き継ぐ）
@@ -189,12 +204,17 @@ sudo rm -rf /opt/lxd-data/selfcode
 rm -rf ~/.opencode            # opencode（~/.opencode/bin/opencode）
 sudo npm uninstall -g freebuff
 rm -f ~/.local/bin/agy         # Antigravity CLI (agy)
+sudo apt purge beacon || sudo dnf remove beacon || sudo rpm -e beacon   # beacon.sh (systemd 環境は beacon-collector も停止)
+sudo systemctl stop beacon-collector 2>/dev/null || true
+rm -f ~/.local/bin/beacon /usr/local/bin/beacon; sudo rm -rf /opt/beacon   # beacon（tarball 導入の場合）
+rm -rf /opt/lxd-data/beacon    # beacon の記憶データ（退避したい場合は先にコピー）
 ```
 
 ## 補足
 
 - opencode のモデル設定・プロバイダ認証はホスト側の `~/.config/opencode/` を使います。
 - opencode サーバーは 127.0.0.1 の一時ポートで起動し、外部には公開しません。
+- beacon.sh (Agent Beacon) の収集データは既定で `/opt/lxd-data/beacon`（`BEACON_DATA_DIR`）にローカル保管されます（ローカルファースト。Beacon Cloud への接続は `beacon login` / `beacon endpoint connect` を明示的に実行した場合に限ります）。
 - 認証情報やデータベースなどの個人情報は `.gitignore` でリポジトリから除外されています。
 
 <img src="image-ph.png" alt="ロゴ画像" width="320">

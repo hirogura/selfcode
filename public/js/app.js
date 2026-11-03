@@ -1378,6 +1378,129 @@ const App = (() => {
     else showAiSettings();
   }
 
+  // ---- beacon.sh（共通記憶層）カード（AI設定パネル） ----
+  // 状態表示 / 再起動（beacon-collector）/ 記憶フォルダを開く / オンデマンドインストール
+  let beaconStatusCache = null; // 直近の /api/beacon/status の応答
+  let beaconPollTimer = null; // インストール実行中の進捗ポーリング
+
+  function beaconButtons() {
+    return {
+      refresh: $("btn-beacon-refresh"),
+      restart: $("btn-beacon-restart"),
+      folder: $("btn-beacon-folder"),
+      install: $("btn-beacon-install"),
+      status: $("ais-beacon-status"),
+      log: $("ais-beacon-log"),
+    };
+  }
+
+  async function loadBeaconStatus() {
+    const btns = beaconButtons();
+    if (!btns.status) return null;
+    try {
+      const st = await API.get("/api/beacon/status", undefined, 20000);
+      beaconStatusCache = st;
+      renderBeaconStatus(st);
+      return st;
+    } catch (e) {
+      btns.status.textContent = "beacon.sh の状態を取得できませんでした: " + e.message;
+      return null;
+    }
+  }
+
+  function renderBeaconStatus(st) {
+    const btns = beaconButtons();
+    try {
+      if (st.install && st.install.running) {
+        btns.status.textContent = "インストール中…";
+      } else if (st.installed) {
+        let svcLine;
+        if (!st.service || !st.service.available) {
+          svcLine = "サービス: systemd 状態を取得できません";
+        } else if (st.service.active) {
+          svcLine = `サービス: 稼働中 (${st.service.state})`;
+        } else {
+          svcLine = `サービス: 停止中 (${st.service.state || "unknown"})`;
+        }
+        const dirLine = `記憶データ: ${st.dataDir.path}${st.dataDir.exists ? "" : "（未作成）"}`;
+        btns.status.textContent = `${st.version || "version 取得できず"} / ${svcLine} / ${dirLine}`;
+      } else {
+        btns.status.textContent = "未インストール（「インストール」で CLI とエンドポイントを導入できます）";
+      }
+    } catch {}
+    try {
+      // インストールの進捗・完了ログの表示（実行中は 2 秒間隔でポーリング）
+      if (btns.log) {
+        const lines = String((st.install && st.install.log) || "").split("\n").filter(Boolean);
+        if (lines.length) {
+          btns.log.hidden = false;
+          btns.log.textContent = lines.slice(-40).join("\n");
+          btns.log.scrollTop = btns.log.scrollHeight;
+        } else {
+          btns.log.hidden = true;
+          btns.log.textContent = "";
+        }
+      }
+      clearInterval(beaconPollTimer);
+      beaconPollTimer = null;
+      if (st.install && st.install.running && aiSettingsVisible()) {
+        beaconPollTimer = setInterval(loadBeaconStatus, 2000);
+      }
+    } catch {}
+    try {
+      if (btns.install) btns.install.disabled = !!(st.install && st.install.running);
+      if (btns.restart) btns.restart.disabled = !st.installed;
+    } catch {}
+  }
+
+  async function installBeacon() {
+    if (!confirm(
+      "beacon.sh (Agent Beacon) をインストールしますか？\n\n" +
+      "・公式リリースから CLI を導入\n" +
+      "・opencode / claude / codex などのセッション記録をローカル (BEACON_DATA_DIR) に収集するようエンドポイントを設定\n\n" +
+      "完了後はこのカードの「状態更新」で反映されます。"
+    )) return;
+    try {
+      await API.post("/api/beacon/install", {}, undefined, 8000);
+      toast("beacon.sh のインストールを開始しました");
+      const btns = beaconButtons();
+      if (btns.log) btns.log.hidden = false;
+      if (btns.status) btns.status.textContent = "インストール中…";
+      await loadBeaconStatus();
+    } catch (e) {
+      toast(e.message, true);
+      loadBeaconStatus();
+    }
+  }
+
+  async function restartBeacon() {
+    if (!confirm("beacon-collector サービスを再起動しますか？")) return;
+    const btns = beaconButtons();
+    if (btns.restart) btns.restart.disabled = true;
+    try {
+      await API.post("/api/beacon/restart", {}, undefined, 70000);
+      toast("beacon-collector を再起動しました");
+    } catch (e) {
+      toast(e.message, true);
+    }
+    if (btns.restart) btns.restart.disabled = false;
+    loadBeaconStatus();
+  }
+
+  // BEACON_DATA_DIR をエクスプローラで開く（エクスプローラが閉じていたら開いてから展開）
+  function openBeaconFolder() {
+    const st = beaconStatusCache;
+    const dir = st && st.dataDir ? st.dataDir.path : "";
+    if (!dir) {
+      toast("beacon.sh の状態を先に取得してください", true);
+      loadBeaconStatus();
+      return;
+    }
+    const rel = relPath(dir).replace(/^\/+/, "");
+    if (els.sidebar.classList.contains("hidden")) $("btn-explorer").click();
+    revealInExplorer(rel);
+  }
+
   // 「一時SSH」ボタン: agy などの OAuth 認証を手元 PC から行えるよう、
   // 選択中のコンテナ（未選択ならホスト）の SSH パスワード認証を一時的に有効化する
   async function toggleSshTemp() {
@@ -2378,6 +2501,13 @@ const App = (() => {
         $("btn-ssh-temp").classList.toggle("active", sshTempOn);
       })
       .catch(() => {});
+    // beacon.sh（共通記憶層）カード: 状態表示と各アクション
+    const beaconBtns = beaconButtons();
+    if (beaconBtns.refresh) beaconBtns.refresh.onclick = loadBeaconStatus;
+    if (beaconBtns.restart) beaconBtns.restart.onclick = restartBeacon;
+    if (beaconBtns.folder) beaconBtns.folder.onclick = openBeaconFolder;
+    if (beaconBtns.install) beaconBtns.install.onclick = installBeacon;
+    loadBeaconStatus();
     // AI設定パネルの表示状態を復元
     try { if (localStorage.getItem(AI_SETTINGS_KEY) === "1") showAiSettings(); } catch {}
     // AI設定パネルの「自動承認」チェックボックス（状態の復元と保存）
