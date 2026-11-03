@@ -966,6 +966,7 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
   background: var(--bg-2);
 }
 #ais-beacon-status { font-size: 11.5px; line-height: 1.6; }
+.aisettings .btn:disabled { opacity: .4; cursor: default; pointer-events: none; }
 
 /* ---- AI連携 (cline=PM × opencode=実装) ---- */
 #btn-aibridge.active { background: var(--green, #238636); border-color: var(--green, #238636); color: #fff; }

@@ -1394,17 +1394,48 @@ const App = (() => {
     };
   }
 
-  async function loadBeaconStatus() {
+  async function loadBeaconStatus(showToast) {
     const btns = beaconButtons();
     if (!btns.status) return null;
+    const prev = beaconStatusCache;
     try {
       const st = await API.get("/api/beacon/status", undefined, 20000);
       beaconStatusCache = st;
       renderBeaconStatus(st);
+      // 「状態更新」ボタンからの再取得では、結果をトーストでフィードバックする
+      if (showToast) toast("beacon.sh の状態を更新しました");
+      beaconNotifyChanges(prev, st);
       return st;
     } catch (e) {
       btns.status.textContent = "beacon.sh の状態を取得できませんでした: " + e.message;
+      if (showToast) toast(e.message, true);
       return null;
+    }
+  }
+
+  // 直近の状態からの変化をトーストで通知する（ポーリング中のインストール完了なども拾う）
+  function beaconNotifyChanges(prev, st) {
+    if (!prev) return;
+    if (prev.install && prev.install.running && st.install && !st.install.running) {
+      if (st.install.ok) toast("beacon.sh のインストールが完了しました");
+      else toast("beacon.sh のインストールに失敗しました。ログを確認してください", true);
+      return;
+    }
+    if (!prev.installed && st.installed) toast("beacon CLI が導入されました");
+  }
+
+  function beaconStatusSummary(st) {
+    try {
+      if (st.install && st.install.running) return "インストール中…";
+      if (st.installed) {
+        const svc = st.service && st.service.available
+          ? (st.service.active ? `サービス: 稼働中 (${st.service.state})` : `サービス: 停止中 (${st.service.state || "unknown"})`)
+          : "サービス: 状態不明";
+        return `${st.version || "version 取得できず"} / ${svc}`;
+      }
+      return "未インストール";
+    } catch {
+      return "";
     }
   }
 
@@ -1448,7 +1479,10 @@ const App = (() => {
       }
     } catch {}
     try {
-      if (btns.install) btns.install.disabled = !!(st.install && st.install.running);
+      // 「インストール」ボタンは導入済み・実行中のどちらでも無効化しておく（完了まで押させない）
+      if (btns.install) {
+        btns.install.disabled = !!st.installed || !!(st.install && st.install.running);
+      }
       if (btns.restart) btns.restart.disabled = !st.installed;
     } catch {}
   }
@@ -1458,7 +1492,7 @@ const App = (() => {
       "beacon.sh (Agent Beacon) をインストールしますか？\n\n" +
       "・公式リリースから CLI を導入\n" +
       "・opencode / claude / codex などのセッション記録をローカル (BEACON_DATA_DIR) に収集するようエンドポイントを設定\n\n" +
-      "完了後はこのカードの「状態更新」で反映されます。"
+      "完了するとこのカードの状態とログに反映されます。"
     )) return;
     try {
       await API.post("/api/beacon/install", {}, undefined, 8000);
@@ -2503,7 +2537,7 @@ const App = (() => {
       .catch(() => {});
     // beacon.sh（共通記憶層）カード: 状態表示と各アクション
     const beaconBtns = beaconButtons();
-    if (beaconBtns.refresh) beaconBtns.refresh.onclick = loadBeaconStatus;
+    if (beaconBtns.refresh) beaconBtns.refresh.onclick = () => loadBeaconStatus(true);
     if (beaconBtns.restart) beaconBtns.restart.onclick = restartBeacon;
     if (beaconBtns.folder) beaconBtns.folder.onclick = openBeaconFolder;
     if (beaconBtns.install) beaconBtns.install.onclick = installBeacon;
