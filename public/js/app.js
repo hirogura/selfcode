@@ -1762,14 +1762,18 @@ const App = (() => {
       .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "");
   }
 
-  // ブラウザ通知を送る（通知が無効・未許可なら何もしない）
+  // 通知を送る（ページ内トースト + 許可されていればブラウザ通知も表示）
+  // 仮想VM 等でブラウザ通知が表示されない環境でもトーストで分かるようにする。
   function browserNotify(title, body) {
+    const text = String(body || "").replace(/\s+/g, " ").trim();
+    toast(text ? `${title} — ${text.slice(-120)}` : title);
     try {
-      if (!("Notification" in window) || Notification.permission !== "granted") return;
-      const n = new Notification(title, { body: String(body || "").slice(0, 300) });
-      n.onclick = () => {
-        try { window.focus(); n.close(); } catch {}
-      };
+      if ("Notification" in window && Notification.permission === "granted") {
+        const n = new Notification(title, { body: text.slice(0, 300) });
+        n.onclick = () => {
+          try { window.focus(); n.close(); } catch {}
+        };
+      }
     } catch {}
   }
 
@@ -1778,7 +1782,6 @@ const App = (() => {
   // 通知したら新しい出力が来るまで再通知しない。
   function notifyIdleTick() {
     if (!notifyEnabled()) return;
-    if ("Notification" in window && Notification.permission !== "granted") return;
     const now = Date.now();
     for (const p of termState.panes.values()) {
       if (p.closed || !p.running || p.waitNotified || !p.lastDataAt) continue;
@@ -1801,7 +1804,6 @@ const App = (() => {
   function notifyPaneExit(pane, cmd, code) {
     if (pane && pane.waitNotified) pane.waitNotified = false;
     if (!notifyEnabled() || !NOTIFY_AI_CMDS.has(cmd)) return;
-    if ("Notification" in window && Notification.permission !== "granted") return;
     const name = cmd === "agy" ? "agy (Antigravity CLI)" : cmd;
     browserNotify(`${name} が終了しました`, code === 0 ? "タスク完了（終了コード 0）" : `終了コード: ${code}`);
   }
@@ -2574,20 +2576,24 @@ const App = (() => {
       notifyCheck.addEventListener("change", () => {
         try {
           if (!notifyCheck.checked) return;
+          // ブラウザ通知は許可が無くてもページ内トーストで通知するので、
+          // チェックは解除せず続行する
+          if (!("Notification" in window)) {
+            toast("このブラウザは通知未対応のため、ページ内トーストで通知します");
+            return;
+          }
           if (Notification.permission === "default") {
             Notification.requestPermission().then((perm) => {
               if (perm !== "granted") {
-                notifyCheck.checked = false;
-                try { localStorage.setItem(NOTIFY_IDLE_KEY, "0"); } catch {}
-                toast("ブラウザ通知が許可されませんでした", true);
+                toast("ブラウザ通知は許可されませんでしたが、ページ内トーストで通知します");
               } else {
                 toast("ブラウザ通知を有効にしました");
               }
             }).catch(() => {});
           } else if (Notification.permission === "denied") {
-            notifyCheck.checked = false;
-            try { localStorage.setItem(NOTIFY_IDLE_KEY, "0"); } catch {}
-            toast("ブラウザ設定で通知が拒否されています", true);
+            toast("ブラウザ通知は拒否されているため、ページ内トーストで通知します");
+          } else {
+            toast("ブラウザ通知が有効です");
           }
         } catch {}
       });
