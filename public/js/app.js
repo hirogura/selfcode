@@ -127,6 +127,8 @@ const App = (() => {
     onTermExit: (fn) => addTermExitListener(fn),
     // aibridge.js などからも使える共通通知 API（トースト＋OS通知＋タイトル点滅＋着信音）
     notify: (title, body) => browserNotify(title, body),
+    // チャットパネルの入力待ち通知用（「通知表示」チェックがONのときだけ通知）
+    notifyIfEnabled: (title, body) => { if (notifyEnabled()) browserNotify(title, body); },
   };
 
   async function openFile(path) {
@@ -1799,7 +1801,7 @@ const App = (() => {
   // 終了（タスク完了）通知の対象 CLI
   const NOTIFY_AI_CMDS = new Set(["freebuff", "cline", "opencode", "agy"]);
   // 入力待ちっぽい出力かのざっくり判定（aibridge.js の ASK/HUMAN パターンと同じ考え方）
-  const NOTIFY_WAIT_RE = /\[y\/n\]|\(y\/n\)|\[Y\/n\]|\(yes\/no\)|yes\/no|press (enter|any key)|press \[|choose (one|an option)|select (one|an option)|continue\?|proceed\?|are you sure|do you want|shall I|may I|waiting for|awaiting|needs your|require(s)? (your )?(input|approval|permission|confirmation)|permission|approval|confirm|login|sign[\s_\-]*in|承認|許可|確認が必要|続行しますか|実行しますか|よろしいですか|入力してください|選択してください|答えてください|教えてください|\?\s*$/i;
+  const NOTIFY_WAIT_RE = /\[y\/n\]|\(y\/n\)|\[Y\/n\]|\(yes\/no\)|yes\/no|press (enter|any key)|press \[|choose (one|an option)|select (one|an option)|continue\?|proceed\?|are you sure|do you want|shall I|may I|waiting for|awaiting|needs your|require(s)? (your )?(input|approval|permission|confirmation)|permission|approval|confirm|login|sign[\s_\-]*in|承認|許可|確認が必要|続行しますか|実行しますか|よろしいですか|入力してください|選択してください|答えてください|教えてください|\?\s*$|？\s*$/i;
 
   function notifyEnabled() {
     const el = $("ais-notify");
@@ -1895,7 +1897,9 @@ const App = (() => {
           const n = new Notification(title, opts);
           n.onclick = () => { try { window.focus(); n.close(); } catch {} };
         }
-      } catch {}
+      } catch (e) {
+        try { console.warn("OS通知の送信に失敗しました", e); } catch {}
+      }
     };
     send();
   }
@@ -1907,6 +1911,23 @@ const App = (() => {
     flashTitle(label);
     notifyBeep();
     showOsNotification(title, text);
+  }
+
+  // AI設定パネルの「通知表示」欄に、OS通知が使える状態かどうかを表示する
+  function refreshNotifyStatus() {
+    const el = $("ais-notify-status");
+    if (!el) return;
+    if (!window.isSecureContext || !("Notification" in window)) {
+      el.textContent = "この環境ではOS通知を使えません（HTTPS または localhost で開いてください）。タイトル点滅・着信音・ページ内トーストで通知します。";
+      return;
+    }
+    if (Notification.permission === "granted") {
+      el.textContent = "ブラウザ通知: 許可済み（OS通知が届きます）";
+    } else if (Notification.permission === "denied") {
+      el.textContent = "ブラウザ通知: 拒否されています（ブラウザのサイト設定から許可してください）";
+    } else {
+      el.textContent = "ブラウザ通知: 未設定（チェックを入れ直すと許可を求めます）";
+    }
   }
 
   // 定期チェック: 実行中のコマンドの出力が止まっており、出力末尾が
@@ -2737,6 +2758,7 @@ const App = (() => {
               } else {
                 toast("ブラウザ通知を有効にしました（タブを開いていないときも通知します）");
               }
+              refreshNotifyStatus();
             }).catch(() => {});
           } else if (Notification.permission === "denied") {
             toast("ブラウザ通知は拒否されているため、タイトル点滅と着信音で通知します");
@@ -2750,6 +2772,7 @@ const App = (() => {
     setInterval(notifyIdleTick, 2000);
     // Service Worker 通知 / 着信音の解錠 / タイトル点滅の解除
     initNotifySW();
+    refreshNotifyStatus();
     ["keydown", "pointerdown", "click"].forEach((ev) =>
       window.addEventListener(ev, unlockNotifyAudio)
     );

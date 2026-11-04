@@ -16,6 +16,7 @@ const Chat = (() => {
   let healing = false;
   let workingEl = null;
   let pendingQuestions = []; // opencode の保留中の質問（question ツール）
+  let notifiedQuestionIds = new Set(); // 通知済みの質問 requestID（1件につき1回だけ通知）
   let questionMap = new Map(); // "messageID:callID" -> QuestionRequest
   let questionsApiOk = true; // 古い opencode には /question が無いため最初の 404 で無効化
 
@@ -259,6 +260,7 @@ const Chat = (() => {
     renderedPerms = new Set();
     questionMap.clear();
     pendingQuestions = [];
+    notifiedQuestionIds = new Set();
     window.__pv = window.__pv || new Map();
     for (const k of Array.from(window.__pv.keys())) window.__pv.delete(k);
   }
@@ -778,6 +780,9 @@ const Chat = (() => {
     wrap.append(title, meta, actions);
     el.messages.appendChild(wrap);
     scrollBottom();
+    if (window.App && typeof App.notifyIfEnabled === "function") {
+      App.notifyIfEnabled("opencode が許可を求めています", perm.title || perm.type || "permission requested");
+    }
   }
 
   function sigOf(msgs) {
@@ -872,6 +877,22 @@ const Chat = (() => {
             if (q.tool && q.tool.messageID && q.tool.callID) {
               questionMap.set(q.tool.messageID + ":" + q.tool.callID, q);
             }
+          }
+          // 新しい保留中の質問があれば1回だけ通知する（「通知表示」チェックがONのとき）
+          const pendingIds = new Set();
+          for (const q of pendingQuestions) {
+            if (!q || !q.id) continue;
+            pendingIds.add(q.id);
+            if (notifiedQuestionIds.has(q.id)) continue;
+            notifiedQuestionIds.add(q.id);
+            const q0 = (Array.isArray(q.questions) && q.questions[0]) || {};
+            const text = (q0.header ? "[" + q0.header + "] " : "") + (q0.question || "回答を待っています");
+            if (window.App && typeof App.notifyIfEnabled === "function") {
+              App.notifyIfEnabled("opencode が質問しています", text);
+            }
+          }
+          for (const id of Array.from(notifiedQuestionIds)) {
+            if (!pendingIds.has(id)) notifiedQuestionIds.delete(id);
           }
         }
       }
