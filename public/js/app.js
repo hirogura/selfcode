@@ -1428,9 +1428,11 @@ const App = (() => {
     try {
       if (st.install && st.install.running) return "インストール中…";
       if (st.installed) {
+        // コンテナ選択中（target あり）は systemd 無し環境が多くても「停止中」と表示する
+        // （ホストで稼働していてもコンテナ内で動いていなければ意味が無いため）
         const svc = st.service && st.service.available
           ? (st.service.active ? `サービス: 稼働中 (${st.service.state})` : `サービス: 停止中 (${st.service.state || "unknown"})`)
-          : "サービス: 状態不明";
+          : (st.target ? "サービス: 停止中（systemd 無し）" : "サービス: 状態不明");
         return `${st.version || "version 取得できず"} / ${svc}`;
       }
       return "未インストール";
@@ -1447,14 +1449,19 @@ const App = (() => {
       } else if (st.installed) {
         let svcLine;
         if (!st.service || !st.service.available) {
-          svcLine = "サービス: systemd 状態を取得できません";
+          // コンテナ選択中は systemd 無くても意味が通るように「停止中」とする
+          svcLine = st.target ? "サービス: 停止中（systemd 無し）" : "サービス: systemd 状態を取得できません";
         } else if (st.service.active) {
           svcLine = `サービス: 稼働中 (${st.service.state})`;
         } else {
           svcLine = `サービス: 停止中 (${st.service.state || "unknown"})`;
         }
         const dirLine = `記憶データ: ${st.dataDir.path}${st.dataDir.exists ? "" : "（未作成）"}`;
-        btns.status.textContent = `${st.version || "version 取得できず"} / ${svcLine} / ${dirLine}`;
+        const targetLine = st.target ? ` / 対象: コンテナ「${st.target.name}」` : "";
+        btns.status.textContent = `${st.version || "version 取得できず"} / ${svcLine}${targetLine} / ${dirLine}`;
+      } else if (st.target) {
+        // コンテナ選択中で未インストール: ホスト側の導入状況は無関係にボタンを押せる
+        btns.status.textContent = `コンテナ「${st.target.name}」には未インストール（「インストール」でコンテナ内に CLI とエンドポイントを導入できます）`;
       } else {
         btns.status.textContent = "未インストール（「インストール」で CLI とエンドポイントを導入できます）";
       }
@@ -1488,11 +1495,15 @@ const App = (() => {
   }
 
   async function installBeacon() {
+    const st = beaconStatusCache;
+    const inContainer = !!(st && st.target);
+    const targetLine = inContainer ? `コンテナ「${st.target.name}」内に ` : "";
     if (!confirm(
-      "beacon.sh (Agent Beacon) をインストールしますか？\n\n" +
+      `${targetLine}beacon.sh (Agent Beacon) をインストールしますか？\n\n` +
       "・公式リリースから CLI を導入\n" +
-      "・opencode / claude / codex などのセッション記録をローカル (BEACON_DATA_DIR) に収集するようエンドポイントを設定\n\n" +
-      "完了するとこのカードの状態とログに反映されます。"
+      "・opencode / claude / codex などのセッション記録をローカル (BEACON_DATA_DIR) に収集するようエンドポイントを設定\n" +
+      (inContainer ? "・コンテナ内は systemd が無いことが多く、サービス（beacon-collector）は構成されません\n" : "") +
+      "\n完了するとこのカードの状態とログに反映されます。"
     )) return;
     try {
       await API.post("/api/beacon/install", {}, undefined, 8000);

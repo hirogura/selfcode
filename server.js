@@ -344,7 +344,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "2.7.2",
+    version: "2.7.3",
     bootId: BOOT_ID,
     workspace: ROOT,
     distro: DISTRO,
@@ -446,8 +446,66 @@ async function beaconServiceInfo() {
   }
 }
 
+// コンテナ内の beacon 状態を 1 回の sh -c プローブで取得する。
+// 出力は bin:<絶対パス｜空> / ver:<1行目> / sysd:0|1 / svc:<is-active の値> / data:0|1 の行。
+// コンテナ内では BEACON_BIN（ホスト用の絶対パス上書き）は無視して PATH から探す。
+const BEACON_CONTAINER_PROBE =
+  'export PATH="$HOME/.local/bin:/opt/beacon/bin:/usr/local/bin:$PATH"; ' +
+  'B="$(command -v beacon)"; ' +
+  'echo "bin:$B"; ' +
+  'if [ -n "$B" ]; then echo "ver:$("$B" version 2>/dev/null | head -n 1)"; fi; ' +
+  'if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then ' +
+  'echo "sysd:1"; echo "svc:$(systemctl is-active ' + BEACON_SERVICE + ' 2>/dev/null || true)"; ' +
+  'else echo "sysd:0"; fi; ' +
+  '[ -d ' + shq(BEACON_DATA_DIR) + ' ] && echo "data:1" || echo "data:0"';
+
+// 上記プローブをパースしてコンテナ内の beacon 状態にする
+function parseBeaconContainerProbe(out, err) {
+  const lines = String((out || "") + "\n" + (err || "")).split("\n").map((l) => l.trim()).filter(Boolean);
+  const info = { binPath: null, version: null, systemd: false, service: null, active: false, dataDirExists: false };
+  for (const line of lines) {
+    if (line.startsWith("bin:")) info.binPath = line.slice(4) || null;
+    else if (line.startsWith("ver:")) info.version = line.slice(4).trim() || null;
+    else if (line.startsWith("sysd:")) info.systemd = line.slice(5) === "1";
+    else if (line.startsWith("svc:")) info.service = line.slice(4).trim() || null;
+    else if (line.startsWith("data:")) info.dataDirExists = line.slice(5) === "1";
+  }
+  if (info.service) info.active = info.service === "active";
+  return info;
+}
+
+// コンテナ内の beacon 状態（インストール有無・バージョン・サービス・記憶データ有無）。
+// systemd 無しのコンテナが多く、その場合はサービスを「停止中（systemd 無し）」扱いにする。
+async function beaconContainerStatus() {
+  const info = { binPath: null, version: null, systemd: false, service: null, active: false, dataDirExists: false };
+  let probeError = null;
+  try {
+    const r = await runContainer(["sh", "-c", BEACON_CONTAINER_PROBE], { timeoutMs: 20000 });
+    Object.assign(info, parseBeaconContainerProbe(r.stdout.toString("utf8"), r.stderr.toString("utf8")));
+  } catch (e) {
+    probeError = e.message;
+  }
+  return {
+    installed: !!info.binPath,
+    binPath: info.binPath,
+    version: info.version,
+    versionError: null,
+    harnesses: BEACON_HARNESSES,
+    dataDir: { path: BEACON_DATA_DIR, exists: info.dataDirExists },
+    service: {
+      name: BEACON_SERVICE,
+      available: info.systemd,
+      active: info.active,
+      state: info.service,
+      // systemd 無し（コンテナでよくある）は「状態不明」ではなく「停止中」として扱う
+      stopped: !info.systemd || info.service !== "active",
+    },
+    probeError,
+  };
+}
+
 // オンデマンドインストールの進捗管理（UI からロック取得 → バックグラウンド実行 → status でポーリング）
-const beaconInstall = { running: false, startedAt: null, finishedAt: null, ok: null, log: [], child: null };
+const beaconInstall = { running: false, startedAt: null, finishedAt: null, ok: null, log: [], child: null, target: null };
 const BEACON_INSTALL_LOG_MAX = 200;
 
 function beaconLogPush(chunk) {
@@ -529,6 +587,24 @@ function buildBeaconInstallScript() {
   ].join("\n");
 }
 
+// コンテナ内向けのインストールスクリプト。systemd 無し環境が多いため公式 install.sh
+// （.deb/.rpm + beacon-collector サービス構成）は使わず tarball 導入 → エンドポイント設定 のみ。
+function buildBeaconContainerInstallScript() {
+  return [
+    "set -e",
+    "export BEACON_DATA_DIR=" + shq(BEACON_DATA_DIR),
+    "export PATH=\"$HOME/.local/bin:/opt/beacon/bin:/usr/local/bin:$PATH\"",
+    "echo '[selfcode] beacon.sh (Agent Beacon) をコンテナ内にインストールします…'",
+    ...BEACON_TARBALL_STEPS,
+    "B=\"$(command -v beacon || echo beacon)\"",
+    "$B version",
+    "echo '[selfcode] エンドポイント（ハーネス計測）を設定します…'",
+    // sudo が無い環境では --system 再試行が飛ばされ、失敗理由がログに残って継続する
+    BEACON_ENDPOINT_STEP,
+    "echo '[selfcode] インストールが完了しました'",
+  ].join("\n");
+}
+
 function startBeaconInstall() {
   if (beaconInstall.running) return;
   beaconInstall.running = true;
@@ -536,11 +612,20 @@ function startBeaconInstall() {
   beaconInstall.finishedAt = null;
   beaconInstall.ok = null;
   beaconInstall.log = [];
-  console.log("[selfcode] beacon install started");
-  const child = spawn("bash", ["-c", buildBeaconInstallScript()], {
-    env: beaconEnv(),
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  // コンテナ選択中はコンテナ内に導入する（ホストには何もしない）
+  beaconInstall.target = containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null;
+  console.log("[selfcode] beacon install started" + (beaconInstall.target ? ` (container: ${beaconInstall.target.name})` : ""));
+  let child;
+  if (beaconInstall.target) {
+    child = spawn(containerBin(beaconInstall.target.runtime), containerExecArgs(beaconInstall.target.runtime, beaconInstall.target.name, false).concat(["sh", "-c", buildBeaconContainerInstallScript()]), {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } else {
+    child = spawn("bash", ["-c", buildBeaconInstallScript()], {
+      env: beaconEnv(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  }
   beaconInstall.child = child;
   child.stdout.on("data", (d) => beaconLogPush(d));
   child.stderr.on("data", (d) => beaconLogPush(d));
@@ -560,29 +645,51 @@ function startBeaconInstall() {
 }
 
 async function beaconStatus() {
-  const bin = beaconBinPath();
-  const installed = !!bin;
+  const target = containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null;
+  let installed = false;
+  let binPath = null;
   let version = null;
   let versionError = null;
-  if (installed) {
-    try {
-      const r = await runOut(bin, ["version"], 8000);
-      version = ((r.out || "") + (r.err || "")).trim().split("\n").filter(Boolean)[0] || null;
-    } catch (e) {
-      versionError = e.message;
+  let service;
+  let dataDir;
+  let probeError = null;
+  if (target) {
+    // コンテナ選択中はコンテナ内の状態を見る（ホストに導入済みでもコンテナ内で動いていなければ意味が無い）
+    const c = await beaconContainerStatus();
+    installed = c.installed;
+    binPath = c.binPath;
+    version = c.version;
+    service = c.service;
+    dataDir = c.dataDir;
+    probeError = c.probeError;
+  } else {
+    binPath = beaconBinPath();
+    installed = !!binPath;
+    dataDir = { path: BEACON_DATA_DIR, exists: fs.existsSync(BEACON_DATA_DIR) };
+    service = await beaconServiceInfo();
+    if (installed) {
+      try {
+        const r = await runOut(binPath, ["version"], 8000);
+        version = ((r.out || "") + (r.err || "")).trim().split("\n").filter(Boolean)[0] || null;
+      } catch (e) {
+        versionError = e.message;
+      }
     }
   }
   return {
     installed,
-    binPath: bin,
+    binPath,
     version,
     versionError,
     harnesses: BEACON_HARNESSES,
-    dataDir: { path: BEACON_DATA_DIR, exists: fs.existsSync(BEACON_DATA_DIR) },
-    service: await beaconServiceInfo(),
+    dataDir,
+    target,
+    service,
+    probeError,
     install: {
       running: beaconInstall.running,
       ok: beaconInstall.ok,
+      target: beaconInstall.target,
       startedAt: beaconInstall.startedAt,
       finishedAt: beaconInstall.finishedAt,
       log: beaconInstall.log.slice(-40).join("\n"),
@@ -602,19 +709,30 @@ app.get("/api/beacon/status", async (req, res, next) => {
 // beacon-collector サービス（エンドポイントの常駐プロセス）の再起動
 app.post("/api/beacon/restart", async (req, res, next) => {
   try {
-    if (!beaconBinPath()) {
-      return res.status(400).json({ error: "beacon がインストールされていません。「AI設定」の「インストール」ボタンから導入してください" });
+    if (containerCtx) {
+      // コンテナ選択中はコンテナ内の beacon-collector をいじる
+      const info = await beaconContainerStatus();
+      if (!info.installed) {
+        return res.status(400).json({ error: `コンテナ「${containerCtx.name}」内に beacon がインストールされていません。「インストール」ボタンから導入してください` });
+      }
+      if (!info.service.available) {
+        return res.status(500).json({ error: `コンテナ「${containerCtx.name}」内では systemd が利用できないため ${BEACON_SERVICE} を再起動できません` });
+      }
+      await runContainer(["sh", "-c", "systemctl restart " + BEACON_SERVICE], { timeoutMs: 60000 });
+    } else {
+      if (!beaconBinPath()) {
+        return res.status(400).json({ error: "beacon がインストールされていません。「AI設定」の「インストール」ボタンから導入してください" });
+      }
+      const svc = await beaconServiceInfo();
+      if (!svc.available) {
+        return res.status(500).json({ error: `systemd が利用できないため ${BEACON_SERVICE} を再起動できません` });
+      }
+      // サービス操作は root 権限が必要。systemd 管理下の selfcode は root で動くため通常は直接、
+      // user 実行時は password-less sudo で再試行する（sudo -n なので対話待ちはしない）。
+      await runCmd(IS_ROOT ? "systemctl" : "sudo", IS_ROOT ? ["restart", BEACON_SERVICE] : ["-n", "systemctl", "restart", BEACON_SERVICE], 60000);
     }
-    const svc = await beaconServiceInfo();
-    if (!svc.available) {
-      return res.status(500).json({ error: `systemd が利用できないため ${BEACON_SERVICE} を再起動できません` });
-    }
-    console.log("[selfcode] beacon collector restart requested");
-    // サービス操作は root 権限が必要。systemd 管理下の selfcode は root で動くため通常は直接、
-    // user 実行時は password-less sudo で再試行する（sudo -n なので対話待ちはしない）。
-    await runCmd(IS_ROOT ? "systemctl" : "sudo", IS_ROOT ? ["restart", BEACON_SERVICE] : ["-n", "systemctl", "restart", BEACON_SERVICE], 60000);
-    const after = await beaconServiceInfo();
-    res.json({ ok: true, service: after });
+    console.log("[selfcode] beacon collector restart requested" + (containerCtx ? ` (container: ${containerCtx.name})` : ""));
+    res.json({ ok: true, target: containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null });
   } catch (e) {
     if (res.headersSent) return next(e);
     res.status(500).json({ error: `${BEACON_SERVICE} の再起動に失敗しました: ${e.message}` });
@@ -2546,10 +2664,11 @@ const INSTALL_CMDS = {
 
 // コンテナ内でコマンドを実行するための CLI 引数（tty: ターミナル用に疑似端末を割り当てる）
 // lxc exec / docker exec はデフォルトでホームディレクトリから起動するため、--cwd / を付けて
-// コンテナ内のルートから起動する（エクスプローラのルートをコンテナ内の / に合わせる）
+// コンテナ内のルートから起動する（エクスプローラのルートをコンテナ内の / に合わせる）。
+// あわせて BEACON_DATA_DIR を引き継がせる（コンテナ内で動く AI エージェントに記憶データ置き場を伝える）
 function containerExecArgs(runtime, name, tty) {
-  if (runtime === "docker") return tty ? ["exec", "-it", "-w", "/", name] : ["exec", "-i", "-w", "/", name];
-  return tty ? ["exec", "-t", "--cwd", "/", name, "--"] : ["exec", "--cwd", "/", name, "--"];
+  if (runtime === "docker") return tty ? ["exec", "-it", "-w", "/", "-e", "BEACON_DATA_DIR=" + BEACON_DATA_DIR, name] : ["exec", "-i", "-w", "/", "-e", "BEACON_DATA_DIR=" + BEACON_DATA_DIR, name];
+  return tty ? ["exec", "-t", "--cwd", "/", "--env", "BEACON_DATA_DIR=" + BEACON_DATA_DIR, name, "--"] : ["exec", "--cwd", "/", "--env", "BEACON_DATA_DIR=" + BEACON_DATA_DIR, name, "--"];
 }
 
 // sh -c に埋め込むためのシングルクォートエスケープ

@@ -9,7 +9,7 @@ code-server のようにブラウザから使えて、opencodeやFreebuff、Goog
 - **opencode / freebuff / agy (Antigravity CLI)** ボタンでターミナルを分割して CLI を起動（未インストールなら確認して自動インストール）
 - **一時SSH** ボタンで、agy などの OAuth 認証を手元 PC から行えるよう SSH のパスワード認証・root ログインを一時的に有効化（もう一度押すと解除）
 - **通知表示**（AI設定パネル）チェックボックスで、AI ツールのタスク完了時や質問・承認確認など入力待ちの発生時にブラウザ通知
-- **beacon.sh (Agent Beacon) 連携**（AI設定パネルの beacon.sh カード）： opencode / Claude Code / Codex など 20+ ハーネスのセッションをローカルに集約する共通記憶層。状態表示・再起動・記憶フォルダを開く・オンデマンドインストールが UI から可能
+- **beacon.sh (Agent Beacon) 連携**（AI設定パネルの beacon.sh カード）： opencode / Claude Code / Codex など 20+ ハーネスのセッションをローカルに集約する共通記憶層。状態表示・再起動・記憶フォルダを開く・オンデマンドインストールが UI から可能。コンテナ（lxc / docker exec の対象）を表示中はコンテナ内の状態を見て、「インストール」もコンテナ内に導入する（systemd が無いコンテナではサービスは「停止中」表示になるとともに、いつでもインストールできる）
 - **LXD / Docker コンテナ連携**（コンテナ内のファイル操作・ターミナル）
 - **GitHub 連携**（ユーザー名・トークンの保存、リポジトリのクローン登録、status / fetch / pull / ログ表示）
 - opencode サーバーはバックエンドが自動起動し、`/opencode/*` でプロキシ（認証情報はブラウザに触れない）
