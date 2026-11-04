@@ -2689,6 +2689,19 @@ const App = (() => {
     if (beaconBtns.reinstall) beaconBtns.reinstall.onclick = reinstallBeacon;
     if (beaconBtns.stop) beaconBtns.stop.onclick = stopBeacon;
     loadBeaconStatus();
+    // 「説明を表示/折りたたむ」ボタン（デフォルト折りたたみ、AI連携パネルの aibridge-hint-toggle と同じ動作）
+    const bindHintToggle = (btnId, boxId) => {
+      const btn = $(btnId), box = $(boxId);
+      if (!btn || !box) return;
+      btn.onclick = () => {
+        const collapsed = box.classList.toggle("collapsed");
+        box.hidden = collapsed;
+        btn.title = collapsed ? "説明を表示" : "説明を折りたたむ";
+      };
+    };
+    bindHintToggle("ais-beacon-hint-toggle", "ais-beacon-hint");
+    bindHintToggle("aisettings-ssh-hint-toggle", "aisettings-ssh-hint");
+    bindHintToggle("ais-notify-hint-toggle", "ais-notify-hint");
     // AI設定パネルの表示状態を復元
     try { if (localStorage.getItem(AI_SETTINGS_KEY) === "1") showAiSettings(); } catch {}
     // AI設定パネルの「自動承認」チェックボックス（状態の復元と保存）
