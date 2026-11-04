@@ -344,7 +344,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "2.7.6",
+    version: "2.7.8",
     bootId: BOOT_ID,
     workspace: ROOT,
     distro: DISTRO,
@@ -743,6 +743,40 @@ app.post("/api/beacon/restart", async (req, res, next) => {
   } catch (e) {
     if (res.headersSent) return next(e);
     res.status(500).json({ error: `${BEACON_SERVICE} の再起動に失敗しました: ${e.message}` });
+  }
+});
+
+// beacon-collector サービス（エンドポイントの常駐プロセス）の停止・無効化（使用をやめるとき）。
+// 再開は「再起動」か「再インストール」（endpoint install と enable --now で復帰する）。
+app.post("/api/beacon/stop", async (req, res, next) => {
+  try {
+    if (containerCtx) {
+      // コンテナ選択中はコンテナ内の beacon-collector をいじる
+      const info = await beaconContainerStatus();
+      if (!info.installed) {
+        return res.status(400).json({ error: `コンテナ「${containerCtx.name}」内に beacon がインストールされていません` });
+      }
+      if (!info.service.available) {
+        return res.status(500).json({ error: `コンテナ「${containerCtx.name}」内では systemd が利用できないため ${BEACON_SERVICE} を停止できません` });
+      }
+      await runContainer(["sh", "-c", "systemctl disable --now " + BEACON_SERVICE], { timeoutMs: 60000 });
+    } else {
+      if (!beaconBinPath()) {
+        return res.status(400).json({ error: "beacon がインストールされていません" });
+      }
+      const svc = await beaconServiceInfo();
+      if (!svc.available) {
+        return res.status(500).json({ error: `systemd が利用できないため ${BEACON_SERVICE} を停止できません` });
+      }
+      // サービス操作は root 権限が必要。systemd 管理下の selfcode は root で動くため通常は直接、
+      // user 実行時は password-less sudo で再試行する（sudo -n なので対話待ちはしない）。
+      await runCmd(IS_ROOT ? "systemctl" : "sudo", IS_ROOT ? ["disable", "--now", BEACON_SERVICE] : ["-n", "systemctl", "disable", "--now", BEACON_SERVICE], 60000);
+    }
+    console.log("[selfcode] beacon collector stop requested" + (containerCtx ? ` (container: ${containerCtx.name})` : ""));
+    res.json({ ok: true, target: containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null });
+  } catch (e) {
+    if (res.headersSent) return next(e);
+    res.status(500).json({ error: `${BEACON_SERVICE} の停止に失敗しました: ${e.message}` });
   }
 });
 

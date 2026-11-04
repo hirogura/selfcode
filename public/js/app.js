@@ -1389,8 +1389,10 @@ const App = (() => {
     return {
       refresh: $("btn-beacon-refresh"),
       restart: $("btn-beacon-restart"),
+      stop: $("btn-beacon-stop"),
       folder: $("btn-beacon-folder"),
       install: $("btn-beacon-install"),
+      reinstall: $("btn-beacon-reinstall"),
       status: $("ais-beacon-status"),
       log: $("ais-beacon-log"),
     };
@@ -1488,11 +1490,18 @@ const App = (() => {
       }
     } catch {}
     try {
-      // 「インストール」ボタンは導入済み・実行中のどちらでも無効化しておく（完了まで押させない）
+      const running = !!(st.install && st.install.running);
+      // 「インストール」は導入済み・実行中のどちらでも無効化しておく（完了まで押させない）
       if (btns.install) {
-        btns.install.disabled = !!st.installed || !!(st.install && st.install.running);
+        btns.install.disabled = !!st.installed || running;
+      }
+      // 「再インストール」は未導入時は通常インストールと同じ動作になるため押せても良い。
+      // 実行中だけ無効化する。
+      if (btns.reinstall) {
+        btns.reinstall.disabled = running;
       }
       if (btns.restart) btns.restart.disabled = !st.installed;
+      if (btns.stop) btns.stop.disabled = !st.installed;
     } catch {}
   }
 
@@ -1507,6 +1516,26 @@ const App = (() => {
       (inContainer ? "・コンテナ内は systemd が無いことが多く、サービス（beacon-collector）は構成されません\n" : "") +
       "\n完了するとこのカードの状態とログに反映されます。"
     )) return;
+    await runBeaconInstall();
+  }
+
+  // 「再インストール」: 導入済み環境でも CLI 導入をスキップし、
+  // エンドポイント（--log-path による書き込み先設定）をやり直して収集を再開する。
+  // 既存環境で selfcode を更新した際に、旧書き込み先から BEACON_DATA_DIR への移行に使える。
+  async function reinstallBeacon() {
+    const st = beaconStatusCache;
+    const inContainer = !!(st && st.target);
+    const targetLine = inContainer ? `コンテナ「${st.target.name}」内で ` : "";
+    if (!confirm(
+      `${targetLine}beacon.sh (Agent Beacon) を再インストールしますか？\n\n` +
+      "・導入済みなら CLI の再導入はスキップ（無ければ導入）\n" +
+      "・エンドポイントを現在の BEACON_DATA_DIR で再設定し、セッション記録の収集を再開\n" +
+      "\n「停止」で止めていた収集もこのボタンで再開できます。"
+    )) return;
+    await runBeaconInstall();
+  }
+
+  async function runBeaconInstall() {
     try {
       await API.post("/api/beacon/install", {}, undefined, 8000);
       toast("beacon.sh のインストールを開始しました");
@@ -1518,6 +1547,27 @@ const App = (() => {
       toast(e.message, true);
       loadBeaconStatus();
     }
+  }
+
+  // 「停止」: beacon-collector を停止・無効化してセッション記録の収集をやめる。
+  // 再開は「再起動」または「再インストール」。
+  async function stopBeacon() {
+    const st = beaconStatusCache;
+    if (!confirm(
+      "beacon-collector サービスを停止・無効化しますか？\n\n" +
+      "・AI セッションの記録収集が止まります（CLI 自体は残ります）\n" +
+      "・再開は「再起動」または「再インストール」"
+    )) return;
+    const btns = beaconButtons();
+    if (btns.stop) btns.stop.disabled = true;
+    try {
+      await API.post("/api/beacon/stop", {}, undefined, 70000);
+      toast("beacon-collector を停止しました");
+    } catch (e) {
+      toast(e.message, true);
+    }
+    if (btns.stop) btns.stop.disabled = false;
+    loadBeaconStatus();
   }
 
   async function restartBeacon() {
@@ -2636,6 +2686,8 @@ const App = (() => {
     if (beaconBtns.restart) beaconBtns.restart.onclick = restartBeacon;
     if (beaconBtns.folder) beaconBtns.folder.onclick = openBeaconFolder;
     if (beaconBtns.install) beaconBtns.install.onclick = installBeacon;
+    if (beaconBtns.reinstall) beaconBtns.reinstall.onclick = reinstallBeacon;
+    if (beaconBtns.stop) beaconBtns.stop.onclick = stopBeacon;
     loadBeaconStatus();
     // AI設定パネルの表示状態を復元
     try { if (localStorage.getItem(AI_SETTINGS_KEY) === "1") showAiSettings(); } catch {}
