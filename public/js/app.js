@@ -654,10 +654,14 @@ const App = (() => {
   // AI連携用: プロセス終了のリスナー（非対話ランの完了検知に使う）
   const termExitListeners = new Set();
   const TERM_LOG_MAX = 200000;
+  const TERM_PLAIN_LOG_MAX = 65536;
   function appendPaneLog(pane, data) {
     if (!pane || typeof data !== "string" || !data) return;
     pane.log = (pane.log || "") + data;
     if (pane.log.length > TERM_LOG_MAX) pane.log = pane.log.slice(pane.log.length - TERM_LOG_MAX);
+    // 通知判定用にANSI除去済みのテキストも保持する（生ログだと再描画のエスケープで
+    // 末尾 4000 バイトがほぼ制御コードで埋まり、入力待ちの行を拾えなくなる）
+    pane.plainLog = ((pane.plainLog || "") + stripAnsi(data)).slice(-TERM_PLAIN_LOG_MAX);
     pane.lastDataAt = Date.now();
     pane.waitNotified = false; // 新しい出力が来たら入力待ち通知をリセット
     for (const fn of Array.from(termDataListeners)) {
@@ -711,6 +715,7 @@ const App = (() => {
       // AI連携用: 役割 ("cline" | "opencode" | null) と出力ログ
       role: null,
       log: "",
+      plainLog: "",
     };
     termState.panes.set(pane.id, pane);
     return pane;
@@ -1808,10 +1813,15 @@ const App = (() => {
     return !!el && el.checked;
   }
 
+  // ANSI エスケープを除去する。SGR（色・属性）はそのまま消し、カーソル移動・
+  // 画面消去系の CSI は改行へ置換する。フルスクリーン TUI（opencode 等）の再描画で
+  // 行区切りが失われても、描画上の行を復元できるようにするため。
   function stripAnsi(s) {
     return String(s || "")
       .replace(/\x1b\][^\x07]*\x07/g, "")
-      .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")
+      .replace(/\x1b\][^\x1b]*\x1b\\/g, "")
+      .replace(/\x1b\[[0-9;?]*m/g, "")
+      .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "\n")
       .replace(/\x1b[()][0-9A-Z]/g, "")
       .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "");
   }
@@ -1939,7 +1949,7 @@ const App = (() => {
     for (const p of termState.panes.values()) {
       if (p.closed || !p.running || p.waitNotified || !p.lastDataAt) continue;
       if (now - p.lastDataAt < NOTIFY_IDLE_MS) continue;
-      const tail = stripAnsi((p.log || "").slice(-4000)).replace(/\r/g, "");
+      const tail = (p.plainLog || "").slice(-8000).replace(/\r/g, "");
       const lines = tail.split("\n");
       let hit = "";
       for (let i = lines.length - 1; i >= 0; i--) {
