@@ -13,7 +13,7 @@
   <header id="topbar">
     <div class="brand">
       <span class="logo"><svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><text x="36" y="70" font-size="52" text-anchor="middle" fill="#fff" font-family="monospace" font-weight="bold">S</text><polyline points="58,40 80,54 58,68" fill="none" stroke="#d1d5db" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-      <span class="title-wrap"><span class="title">selfcode</span><span class="version">v.2.7.4</span></span>
+      <span class="title-wrap"><span class="title">selfcode</span><span class="version">v.2.7.5</span></span>
     </div>
     <button id="btn-explorer" class="btn toggle active" title="エクスプローラの表示切替"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>
     <button id="btn-refresh" class="btn" title="リフレッシュ"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
@@ -162,7 +162,7 @@
             <button id="btn-beacon-folder" class="btn small" title="記憶データフォルダ (BEACON_DATA_DIR) をエクスプローラで開く">記憶フォルダを開く</button>
           </div>
           <pre id="ais-beacon-log" class="beacon-log" hidden></pre>
-          <div class="gh-status" id="ais-beacon-hint">beacon.sh (Agent Beacon) は opencode / Claude Code / Codex など 20+ の AI コーディングセッションをローカルに集約する共通記憶層です。「インストール」で CLI とエンドポイントを導入し、セッション記録を BEACON_DATA_DIR（ローカルファースト）に収集します。コンテナ選択中はそのコンテナ内の状態を表示し、「インストール」もコンテナ内に導入します（ホストで稼働していてもコンテナ内で動いていなければセッションは集約されません）。</div>
+          <div class="gh-status" id="ais-beacon-hint">beacon.sh (Agent Beacon) は opencode / Claude Code / Codex など 20+ の AI コーディングセッションをローカルに集約する共通記憶層です。「インストール」で CLI とエンドポイントを導入し、セッション記録を BEACON_DATA_DIR（ローカルファースト）直下の runtime.jsonl に収集します（インストール時に --log-path を設定するため、BEACON_DATA_DIR 環境変数だけでは beacon 自体の書き込み先は変わりません）。コンテナ選択中はそのコンテナ内の状態を表示し、「インストール」もコンテナ内に導入します（ホストで稼働していてもコンテナ内で動いていなければセッションは集約されません）。</div>
         </div>
         <div class="gh-section">
           <div class="gh-sec-head"><span>一時SSH</span></div>

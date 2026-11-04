@@ -344,7 +344,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "2.7.4",
+    version: "2.7.5",
     bootId: BOOT_ID,
     workspace: ROOT,
     distro: DISTRO,
@@ -547,12 +547,16 @@ const BEACON_TARBALL_STEPS = [
 
 // ハーネス計測（エンドポイント）の設定。user scope bus の無い環境（コンテナ等）では
 // user モードで失敗するため、root / sudo なら --system で再試行する。
+// beacon CLI は BEACON_DATA_DIR 環境変数を参照しないため、セッション記録を
+// BEACON_DATA_DIR 下に書き込ませるには --log-path を明示する必要がある。
 // $B には先行して解決した beacon CLI の絶対パス（無ければ "beacon"）が入っている。
+const BEACON_LOG_PATH = BEACON_DATA_DIR + "/runtime.jsonl";
 const BEACON_ENDPOINT_STEP =
-  "if ! \"$B\" endpoint install --harness '" + BEACON_HARNESSES + "'; then " +
+  "mkdir -p \"$BEACON_DATA_DIR\" 2>/dev/null || true; " +
+  "if ! \"$B\" endpoint install --log-path '" + BEACON_LOG_PATH + "' --harness '" + BEACON_HARNESSES + "'; then " +
   "echo '[selfcode] user モードでの設定に失敗したため、--system で再試行します…'; " +
-  "if [ \"$(id -u)\" = \"0\" ]; then \"$B\" endpoint install --harness '" + BEACON_HARNESSES + "' --system || echo '[selfcode] beacon endpoint install に失敗しました（beacon endpoint doctor で確認できます）'; " +
-  "else sudo -n \"$B\" endpoint install --harness '" + BEACON_HARNESSES + "' --system || echo '[selfcode] beacon endpoint install に失敗しました（beacon endpoint doctor で確認、または手動で再試行してください）'; fi; fi";
+  "if [ \"$(id -u)\" = \"0\" ]; then \"$B\" endpoint install --log-path '" + BEACON_LOG_PATH + "' --harness '" + BEACON_HARNESSES + "' --system || echo '[selfcode] beacon endpoint install に失敗しました（beacon endpoint doctor で確認できます）'; " +
+  "else sudo -n \"$B\" endpoint install --log-path '" + BEACON_LOG_PATH + "' --harness '" + BEACON_HARNESSES + "' --system || echo '[selfcode] beacon endpoint install に失敗しました（beacon endpoint doctor で確認、または手動で再試行してください）'; fi; fi";
 
 // インストールスクリプト（公式 install.sh → tarball フォールバック → beacon endpoint install）。
 // 改行区切りの配列を sh -c に渡すため、各行は単一引用符の中で完結させて書くこと。
@@ -576,9 +580,12 @@ function buildBeaconInstallScript() {
     "$B version",
     "echo '[selfcode] エンドポイント（ハーネス計測）を設定します…'",
     BEACON_ENDPOINT_STEP,
-    "if command -v systemctl >/dev/null 2>&1; then",
+    "if command -v systemctl >/dev/null 2>&1 && [ -f /etc/systemd/system/beacon-collector.service ]; then",
+    // endpoint install が自動で有効化しない環境があるため、コレクタを有効化・起動する
+    "systemctl enable --now beacon-collector 2>/dev/null || [ \"$(id -u)\" = \"0\" ] || (command -v sudo >/dev/null 2>&1 && sudo -n systemctl enable --now beacon-collector) || true",
     "echo \"[selfcode] beacon-collector サービス: $(systemctl is-active beacon-collector 2>/dev/null || echo 不明)\"",
     "fi",
+    "echo \"[selfcode] セッション記録の書き込み先: $(ls \"" + BEACON_DATA_DIR + "/runtime.jsonl\" 2>/dev/null || echo \"" + BEACON_LOG_PATH + "（最初のイベント検出時に作成）\")\"",
     "echo '[selfcode] インストールが完了しました'",
     "else",
     "echo '[selfcode] beacon CLI が見つかりません。インストールに失敗した可能性があります' >&2",
