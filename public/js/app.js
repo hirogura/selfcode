@@ -2696,6 +2696,7 @@ const App = (() => {
       btn.onclick = () => {
         const collapsed = box.classList.toggle("collapsed");
         box.hidden = collapsed;
+        btn.textContent = collapsed ? "▲" : "▼";
         btn.title = collapsed ? "説明を表示" : "説明を折りたたむ";
       };
     };

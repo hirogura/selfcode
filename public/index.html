@@ -167,7 +167,7 @@
             <button id="ais-beacon-hint-toggle" class="btn small hint-toggle" title="説明を表示">▲</button>
           </div>
           <pre id="ais-beacon-log" class="beacon-log" hidden></pre>
-          <div class="gh-status collapsed hidden" id="ais-beacon-hint" hidden>beacon.sh (Agent Beacon) は opencode / Claude Code / Codex など 20+ の AI コーディングセッションをローカルに集約する共通記憶層です。「インストール」で CLI とエンドポイントを導入し、セッション記録を BEACON_DATA_DIR（ローカルファースト）直下の runtime.jsonl に収集します（インストール時に --log-path を設定するため、BEACON_DATA_DIR 環境変数だけでは beacon 自体の書き込み先は変わりません）。コンテナ選択中はそのコンテナ内の状態を表示し、「インストール」もコンテナ内に導入します（ホストで稼働していてもコンテナ内で動いていなければセッションは集約されません）。「再インストール」は導入済みでもエンドポイントの書き込み先（--log-path）を現在の BEACON_DATA_DIR で再設定します（旧環境からの移行や「停止」からの収集再開に使用）。「停止」は beacon-collector を停止・無効化して収集をやめます（再開は「再起動」か「再インストール」）。</div>
+          <div class="gh-status collapsed" id="ais-beacon-hint" hidden>beacon.sh (Agent Beacon) は opencode / Claude Code / Codex など 20+ の AI コーディングセッションをローカルに集約する共通記憶層です。「インストール」で CLI とエンドポイントを導入し、セッション記録を BEACON_DATA_DIR（ローカルファースト）直下の runtime.jsonl に収集します（インストール時に --log-path を設定するため、BEACON_DATA_DIR 環境変数だけでは beacon 自体の書き込み先は変わりません）。コンテナ選択中はそのコンテナ内の状態を表示し、「インストール」もコンテナ内に導入します（ホストで稼働していてもコンテナ内で動いていなければセッションは集約されません）。「再インストール」は導入済みでもエンドポイントの書き込み先（--log-path）を現在の BEACON_DATA_DIR で再設定します（旧環境からの移行や「停止」からの収集再開に使用）。「停止」は beacon-collector を停止・無効化して収集をやめます（再開は「再起動」か「再インストール」）。</div>
         </div>
         <div class="gh-section">
           <div class="gh-sec-head"><span>一時SSH</span></div>
@@ -175,7 +175,7 @@
             <button id="btn-ssh-temp" class="btn toggle" title="agy の認証用に SSH のパスワード認証・root ログインを一時的に有効化（もう一度押すと解除）">一時SSH</button>
             <button id="aisettings-ssh-hint-toggle" class="btn small hint-toggle" title="説明を表示">▲</button>
           </div>
-          <div class="gh-status collapsed hidden" id="aisettings-ssh-hint" hidden>agy などの OAuth 認証を手元 PC から行えるよう、SSH のパスワード認証・root ログインを一時的に有効化します（もう一度押すと解除）。対象コンテナ／ホストの使い方は実行時にターミナルへ表示されます。</div>
+          <div class="gh-status collapsed" id="aisettings-ssh-hint" hidden>agy などの OAuth 認証を手元 PC から行えるよう、SSH のパスワード認証・root ログインを一時的に有効化します（もう一度押すと解除）。対象コンテナ／ホストの使い方は実行時にターミナルへ表示されます。</div>
         </div>
         <div class="gh-section">
           <div class="gh-sec-head"><span>通知表示</span></div>
@@ -183,7 +183,7 @@
             <label class="aibridge-check" style="flex:1"><input type="checkbox" id="ais-notify"><span>入力待ち・完了時にブラウザ通知する</span></label>
             <button id="ais-notify-hint-toggle" class="btn small hint-toggle" title="説明を表示">▲</button>
           </div>
-          <div class="gh-status collapsed hidden" id="ais-notify-hint" hidden>タスク完了時や AI からの質問・承認確認など入力待ちが発生したとき、このブラウザ（PC側）で知らせます。selfcode のタブを開いていない・他のタブを見ているときでも、OS 通知（クリックでこのタブへ戻れる）・タブタイトルの点滅・着信音でお知らせします。チェックを入れると通知の許可を求めます。</div>
+          <div class="gh-status collapsed" id="ais-notify-hint" hidden>タスク完了時や AI からの質問・承認確認など入力待ちが発生したとき、このブラウザ（PC側）で知らせます。selfcode のタブを開いていない・他のタブを見ているときでも、OS 通知（クリックでこのタブへ戻れる）・タブタイトルの点滅・着信音でお知らせします。チェックを入れると通知の許可を求めます。</div>
         </div>
       </div>
     </aside>
