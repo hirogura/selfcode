@@ -125,6 +125,8 @@ const App = (() => {
     termClearRoles: () => clearBridgeRoles(),
     onTermData: (fn) => addTermDataListener(fn),
     onTermExit: (fn) => addTermExitListener(fn),
+    // aibridge.js などからも使える共通通知 API（トースト＋OS通知＋タイトル点滅＋着信音）
+    notify: (title, body) => browserNotify(title, body),
   };
 
   async function openFile(path) {
@@ -1762,19 +1764,99 @@ const App = (() => {
       .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "");
   }
 
-  // 通知を送る（ページ内トースト + 許可されていればブラウザ通知も表示）
-  // 仮想VM 等でブラウザ通知が表示されない環境でもトーストで分かるようにする。
+  // 通知を送る（ページ内トースト + ブラウザ通知 + タブタイトル点滅 + 着信音）。
+  // 通知自体はブラウザ（PC側）で処理される。タブを開いていない・他のタブを見ている
+  // 状態でも知らせられるよう、Service Worker 経由の showNotification（クリックで
+  // selfcode のタブを前面化）を使い、合わせてタイトル点滅と着信音でも知らせる。
+  let notifySWReady = null;
+  let notifyAudioCtx = null;
+
+  function initNotifySW() {
+    try {
+      if (!navigator.serviceWorker || !window.isSecureContext) return;
+      notifySWReady = navigator.serviceWorker
+        .register("/sw.js", { scope: "/" })
+        .catch(() => { notifySWReady = null; return null; });
+    } catch {}
+  }
+
+  let titleFlashTimer = null;
+  let baseTitle = null;
+
+  // バックグラウンド中はタブタイトルを点滅させて気付けるようにする
+  function flashTitle(label) {
+    if (!document.hidden) return;
+    if (baseTitle === null) baseTitle = document.title || "selfcode";
+    if (titleFlashTimer) clearInterval(titleFlashTimer);
+    let on = false;
+    titleFlashTimer = setInterval(() => {
+      on = !on;
+      document.title = on ? `(呼) ${label}` : baseTitle;
+    }, 1000);
+  }
+
+  function stopFlashTitle() {
+    if (titleFlashTimer) { clearInterval(titleFlashTimer); titleFlashTimer = null; }
+    if (baseTitle !== null && document.title !== baseTitle) document.title = baseTitle;
+  }
+
+  // 着信音（AudioContext はユーザー操作で解錠してあるときだけ鳴る。鳴らなくても通知自体は送る）
+  function notifyBeep() {
+    try {
+      if (!notifyAudioCtx || notifyAudioCtx.state !== "running") return;
+      const ctx = notifyAudioCtx;
+      const t0 = ctx.currentTime;
+      [880, 1174.66].forEach((f, i) => {
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.connect(g); g.connect(ctx.destination);
+        o.type = "sine"; o.frequency.value = f;
+        const t = t0 + i * 0.18;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.12, t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+        o.start(t); o.stop(t + 0.18);
+      });
+    } catch {}
+  }
+
+  function unlockNotifyAudio() {
+    try {
+      if (!notifyAudioCtx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        notifyAudioCtx = new AC();
+      }
+      if (notifyAudioCtx.state === "suspended") notifyAudioCtx.resume().catch(() => {});
+    } catch {}
+  }
+
+  // OS レベルの通知（Service Worker 経由が最佳。不可なら通常の Notification、
+  // それも無ければスキップ — トースト・タイトル点滅・着信音は常に送られる）
+  function showOsNotification(title, body) {
+    const opts = { body: String(body || "").slice(0, 300) };
+    const send = async () => {
+      try {
+        if ("Notification" in window && Notification.permission === "granted") {
+          if (notifySWReady && navigator.serviceWorker) {
+            const reg = await notifySWReady;
+            if (reg) { await reg.showNotification(title, opts); return; }
+          }
+          const n = new Notification(title, opts);
+          n.onclick = () => { try { window.focus(); n.close(); } catch {} };
+        }
+      } catch {}
+    };
+    send();
+  }
+
   function browserNotify(title, body) {
     const text = String(body || "").replace(/\s+/g, " ").trim();
-    toast(text ? `${title} — ${text.slice(-120)}` : title);
-    try {
-      if ("Notification" in window && Notification.permission === "granted") {
-        const n = new Notification(title, { body: text.slice(0, 300) });
-        n.onclick = () => {
-          try { window.focus(); n.close(); } catch {}
-        };
-      }
-    } catch {}
+    const label = text ? `${title} — ${text.slice(-120)}` : title;
+    toast(label);
+    flashTitle(label);
+    notifyBeep();
+    showOsNotification(title, text);
   }
 
   // 定期チェック: 実行中のコマンドの出力が止まっており、出力末尾が
@@ -2585,21 +2667,30 @@ const App = (() => {
           if (Notification.permission === "default") {
             Notification.requestPermission().then((perm) => {
               if (perm !== "granted") {
-                toast("ブラウザ通知は許可されませんでしたが、ページ内トーストで通知します");
+                toast("ブラウザ通知は許可されませんでしたが、タイトル点滅と着信音で通知します");
               } else {
-                toast("ブラウザ通知を有効にしました");
+                toast("ブラウザ通知を有効にしました（タブを開いていないときも通知します）");
               }
             }).catch(() => {});
           } else if (Notification.permission === "denied") {
-            toast("ブラウザ通知は拒否されているため、ページ内トーストで通知します");
+            toast("ブラウザ通知は拒否されているため、タイトル点滅と着信音で通知します");
           } else {
-            toast("ブラウザ通知が有効です");
+            toast("ブラウザ通知が有効です（タブを開いていないときも通知します）");
           }
         } catch {}
       });
     }
     // 入力待ち判定の定期チェック
     setInterval(notifyIdleTick, 2000);
+    // Service Worker 通知 / 着信音の解錠 / タイトル点滅の解除
+    initNotifySW();
+    ["keydown", "pointerdown", "click"].forEach((ev) =>
+      window.addEventListener(ev, unlockNotifyAudio)
+    );
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) stopFlashTitle();
+    });
+    window.addEventListener("focus", stopFlashTitle);
     $("btn-term-clear").onclick = () => { const p = activePane(); if (p && p.term) p.term.clear(); };
     $("btn-term-split").onclick = () => splitPane(activePane());
     $("btn-term-refresh").onclick = resetAndCloseTerminal;

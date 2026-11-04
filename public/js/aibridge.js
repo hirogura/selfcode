@@ -135,8 +135,15 @@ window.AIBridge = (() => {
   }
 
   function notifyHuman(title, body) {
-    toast(title, false);
     log(title + (body ? " — " + String(body).slice(0, 200) : ""));
+    // アプリ側の共通通知（トースト＋OS通知＋タイトル点滅＋着信音）があればそちらを使う
+    try {
+      if (window.App && typeof window.App.notify === "function") {
+        window.App.notify(title, body);
+        return;
+      }
+    } catch {}
+    toast(title, false);
     try {
       if ("Notification" in window) {
         if (Notification.permission === "granted") {
