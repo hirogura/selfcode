@@ -20,6 +20,16 @@ const Chat = (() => {
   let questionMap = new Map(); // "messageID:callID" -> QuestionRequest
   let questionsApiOk = true; // 古い opencode には /question が無いため最初の 404 で無効化
 
+  // ---- タスク完了検知（opencode イベントストリーム） ----
+  // opencode server の /event（SSE）で session.status（busy / idle）が配信される。
+  // 「busy → idle」の遷移がタスク完了の正のシグナルなので、これを検知したら
+  // 「通知表示」チェックがONのときに通知する。
+  // SSE が使えない環境では従来のポーリング差分ヒューリスティクスにフォールバックする。
+  let es = null;
+  let sseBusy = false; // session.status / session.idle イベントを1個でも受け取ったら true（SSE が有効とみなす）
+  const busySessions = new Set(); // 現在 busy のセッションID（session.status で更新）
+  let notifiedDoneKeys = new Set(); // フォールバック用: 通知済みの完了メッセージキー（messageID:completed）
+
   const el = {
     status: $("oc-status"),
     statusLabel: $("oc-status").querySelector(".label"),
@@ -81,6 +91,48 @@ const Chat = (() => {
     } else if (workingEl) {
       workingEl.remove();
       workingEl = null;
+    }
+  }
+
+  // タスク完了通知（busy → idle の遷移で呼ぶ）。「通知表示」チェックがONのときだけ通知する
+  function notifySessionDone(sessionID) {
+    if (!window.App || typeof App.notifyIfEnabled !== "function") return;
+    const sess = sessions.find((s) => s.id === sessionID);
+    const label = (sess && sess.title) || (sessionID || "").slice(0, 12);
+    const title = sessionID === current ? "opencode の作業が完了しました" : `opencode の作業が完了しました（${label}）`;
+    App.notifyIfEnabled(title, label === title ? "チャットパネルで結果を確認" : `${label}`);
+  }
+
+  // opencode の /event（SSE）を受け取る。session.status（busy/idle）の遷移でタスク完了を検知する
+  function connectEvents() {
+    try {
+      if (!window.EventSource) return;
+      es = new EventSource("/opencode/event");
+      es.onmessage = (ev) => {
+        if (!ev.data) return;
+        let e = null;
+        try { e = JSON.parse(ev.data); } catch { return; }
+        if (!e || typeof e.type !== "string") return;
+        if (e.type !== "session.status" && e.type !== "session.idle") return;
+        sseBusy = true;
+        const sid = e.properties && e.properties.sessionID;
+        if (!sid) return;
+        if (e.type === "session.status") {
+          const st = e.properties.status || {};
+          if (st.type === "busy") {
+            busySessions.add(sid);
+          } else if (busySessions.delete(sid)) {
+            notifySessionDone(sid); // busy → idle 遷移のみ完了とみなす
+          }
+        } else if (busySessions.delete(sid)) {
+          notifySessionDone(sid); // session.idle（session.status idle の補助シグナル）
+        }
+      };
+      es.onerror = () => {
+        // EventSource は自動再接続する。切断中はポーリング側のフォールバック検知が働く
+      };
+    } catch (e) {
+      console.error("event stream connection failed", e);
     }
   }
 
@@ -827,12 +879,33 @@ const Chat = (() => {
       for (const m of msgs) upsertMessage(m.info, m.parts);
       maybeAutoRename(current, msgs);
 
-      // ビジー判定: セッションが切り替わった直後は誤判定しない（同一セッション内で内容が変わったときだけ「作業中」にする）
+      // ビジー判定: SSE が有効なら opencode 本体の session.status（busy/idle）を正とする。
+      // 無い場合のみ 従来の差分ヒューリスティクス（セッション切替直後の誤判定を避ける）
       const sig = sigOf(msgs);
-      const isBusy = current === prevSession ? sig !== prevSig : false;
+      const isBusy = sseBusy ? busySessions.has(current) : current === prevSession ? sig !== prevSig : false;
       prevSession = current;
       prevSig = sig;
       setBusy(isBusy);
+
+      // SSE 無効環境でのフォールバック完了検知: 最後の assistant メッセージに
+      // time.completed が付いたら（＝実行終了）1回だけ通知する。
+      // ヒューリスティクスは長いツール実行中も誤判定し得るため、
+      // 「completed タイムスタンプが付いた状態で busy が解けた」場合のみ通知する。
+      if (!sseBusy && wasBusy && !isBusy && msgs.length) {
+        const last = msgs[msgs.length - 1];
+        const info = last && last.info;
+        if (info && info.role === "assistant" && info.time && info.time.completed) {
+          const doneKey = info.id + ":" + info.time.completed;
+          if (!notifiedDoneKeys.has(doneKey)) {
+            notifiedDoneKeys.add(doneKey);
+            if (notifiedDoneKeys.size > 200) {
+              // 古いキーを捨てる（キーは完了済みメッセージの重複通知防止用で、なくても害は小さい）
+              notifiedDoneKeys = new Set(Array.from(notifiedDoneKeys).slice(-100));
+            }
+            notifySessionDone(info.sessionID);
+          }
+        }
+      }
       if (wasBusy && !isBusy) {
         if (window.App) App.onSessionIdle();
         const first = document.querySelector(".msg");
@@ -1001,6 +1074,7 @@ const Chat = (() => {
 
   async function init() {
     wire();
+    connectEvents();
     let savedChat = null;
     try {
       const st = await API.status();
