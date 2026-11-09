@@ -93,7 +93,7 @@ PORT=3339 npm start
 | `SELFCODE_USERNAME` / `SELFCODE_PASSWORD` | なし | 設定すると selfcode 自体に Basic 認証を付与 |
 | `SELFCODE_TERM_USER` | 自動検出 | ホスト側ターミナルの既定ユーザー（例: `user`。未指定なら uid 1000 以上の実ユーザーを検出） |
 | `SELFCODE_MEMO` | `/opt/lxd-data/note/selfcode/selfcode-memo.md` | メモパネルの保存先 |
-| `SELFCODE_GITHUB_CONFIG` | `/opt/lxd-data/note/selfcode/selfcode-github.json` | GitHub 連携の設定保存先（設定1/設定2 の2プロファイル分のユーザー名・トークン・登録リポジトリと、アクティブな設定番号。旧形式の単一設定は設定1に引き継ぐ。トークンはブラウザに返さずサーバー側でのみ使用） |
+| `SELFCODE_GITHUB_CONFIG` | `/opt/lxd-data/note/selfcode/selfcode-github.json` | GitHub 連携の設定保存先（設定1/設定2 の2プロファイル分のユーザー名・トークン・登録リポジトリ・コミット設定（git config --global の user.name/user.email）と、アクティブな設定番号。設定切替時は保存済みのコミット設定を自動で gitconfig へ再適用。旧形式の単一設定は設定1に引き継ぐ。トークンはブラウザに返さずサーバー側でのみ使用） |
 | `SELFCODE_TERM_STATE` | `/opt/lxd-data/note/selfcode/selfcode-term.json` | ターミナルのペイン構成（分割・cwd・id）の保存先。別のPCから同じ selfcode を開いても同じターミナルプロセスに再接続するために使う |
 | `SELFCODE_CHAT_STATE` | `/opt/lxd-data/note/selfcode/selfcode-chat.json` | チャットで選択中の opencode セッションとワークスペースの保存先 |
 | `SELFCODE_RESTART_CMD` | `systemctl restart selfcode` | 「リスタート」ボタンが実行するコマンド（Ubuntu / CachyOS ともに systemd のため共通） |

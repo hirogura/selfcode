@@ -344,7 +344,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "2.9.0",
+    version: "2.9.1",
     bootId: BOOT_ID,
     workspace: ROOT,
     distro: DISTRO,
@@ -1428,10 +1428,15 @@ const GITHUB_CONFIG = process.env.SELFCODE_GITHUB_CONFIG || "/opt/lxd-data/note/
 let githubCfg = { active: 0, settings: [{ username: "", token: "", repos: [] }, { username: "", token: "", repos: [] }] };
 
 function normalizeGithubData(d) {
-  const mk = (x) => ({
-    username: String((x && x.username) || ""),
-    token: String((x && x.token) || ""),
-    repos: Array.isArray(x && x.repos) ? x.repos : [],
+  // コミット設定（git config --global の user.name / user.email）もプロファイルごとに保持する
+  // （ユーザーが一度も保存していない場合は undefined → JSON には出力されず、
+  //   「未保存」を判別して実gitconfigの値へフォールバック表示する）
+  const mk = (x = {}) => ({
+    username: String(x.username || ""),
+    token: String(x.token || ""),
+    repos: Array.isArray(x.repos) ? x.repos : [],
+    ...(x.commitName != null ? { commitName: String(x.commitName) } : {}),
+    ...(x.commitEmail != null ? { commitEmail: String(x.commitEmail) } : {}),
   });
   const settings = [mk(d && d.settings && d.settings[0]), mk(d && d.settings && d.settings[1])];
   // 旧形式（単一設定ファイル）は設定1に引き継ぐ
@@ -1762,7 +1767,8 @@ app.put("/api/github/settings", async (req, res, next) => {
   }
 });
 
-// アクティブな設定を切り替える（設定1 / 設定2）
+// アクティブな設定を切り替える（設定1 / 設定2）。
+// 切替後、新しいプロファイルにコミット設定が保存済みなら git config --global へ再適用する。
 app.post("/api/github/settings/active", async (req, res, next) => {
   try {
     const index = req.body.index | 0;
@@ -1770,12 +1776,25 @@ app.post("/api/github/settings/active", async (req, res, next) => {
     githubCfg.active = index;
     await saveGithubConfig();
     const cur = ghCur();
+    let commitApplied = null;
+    let commitApplyError = null;
+    if (cur.commitName != null || cur.commitEmail != null) {
+      try {
+        await runGitConfigSet("user.name", cur.commitName || "");
+        await runGitConfigSet("user.email", cur.commitEmail || "");
+        commitApplied = { name: cur.commitName || "", email: cur.commitEmail || "", target: gitConfigTargetLabel() };
+      } catch (err) {
+        commitApplyError = err.message;
+      }
+    }
     res.json({
       ok: true,
       active: index,
       configured: !!(cur.username && cur.token),
       username: cur.username || null,
       hasToken: !!cur.token,
+      commitApplied,
+      commitApplyError,
     });
   } catch (e) {
     next(e);
@@ -1848,6 +1867,12 @@ async function runGitConfigSet(key, value) {
 
 app.get("/api/github/git-config", async (req, res, next) => {
   try {
+    // プロファイルにコミット設定を保存済みならその値を返す。
+    // タブ切替だけで表示が変わるようにするための優先表示。
+    const cur = ghCur();
+    if (cur.commitName != null || cur.commitEmail != null) {
+      return res.json({ name: cur.commitName || "", email: cur.commitEmail || "", target: gitConfigTargetLabel() });
+    }
     const name = await runGitConfigGet("user.name");
     const email = await runGitConfigGet("user.email");
     res.json({ name, email, target: gitConfigTargetLabel() });
@@ -1860,8 +1885,13 @@ app.put("/api/github/git-config", async (req, res, next) => {
   try {
     const name = String(req.body.name ?? "").trim();
     const email = String(req.body.email ?? "").trim();
+    // 実gitconfigに反映しつつ、アクティブなプロファイルにも保存する（切替時に再適用できるように）
     await runGitConfigSet("user.name", name);
     await runGitConfigSet("user.email", email);
+    const cur = ghCur();
+    cur.commitName = name;
+    cur.commitEmail = email;
+    await saveGithubConfig();
     res.json({ ok: true, name, email, target: gitConfigTargetLabel() });
   } catch (e) {
     next(e);

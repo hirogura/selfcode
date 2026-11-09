@@ -86,11 +86,17 @@ const GithubPanel = (() => {
     const btns = [$("gh-prof-1"), $("gh-prof-2")];
     btns.forEach((b) => { if (b) b.disabled = true; });
     try {
-      await API.github.setActive(index);
+      const res = await API.github.setActive(index);
       $("gh-username").value = "";
       $("gh-token").value = "";
       await refresh();
-      toast("設定" + (index + 1) + " に切り替えました");
+      if (res.commitApplyError) {
+        toast("設定" + (index + 1) + " に切り替えましたが、コミット設定の適用に失敗: " + res.commitApplyError, true);
+      } else if (res.commitApplied) {
+        toast("設定" + (index + 1) + " に切り替えました（コミット設定を適用: " + (res.commitApplied.name || "（user.name 空）") + "）");
+      } else {
+        toast("設定" + (index + 1) + " に切り替えました");
+      }
     } catch (e) {
       toast(e.message, true);
     } finally {
