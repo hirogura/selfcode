@@ -8,7 +8,7 @@ const GithubPanel = (() => {
   const REPOS_COLLAPSED_KEY = "selfcode.reposCollapsed";
   let collapsedRepos = {};
   let loaded = false;
-  let state = { configured: false, username: "", hasToken: false, repos: [] };
+  let state = { configured: false, username: "", hasToken: false, repos: [], active: 0, profiles: [] };
   let lastRegistered = [];
   let templatesCache = null;
 
@@ -57,19 +57,44 @@ const GithubPanel = (() => {
     else show();
   }
 
-  // ---- 設定 ----
+  // ---- 設定（設定1 / 設定2 の切替タブ） ----
 
   function renderSettings() {
+    for (let i = 0; i < 2; i++) {
+      const btn = $("gh-prof-" + (i + 1));
+      if (!btn) continue;
+      const p = (state.profiles && state.profiles[i]) || { username: null };
+      btn.innerHTML = "設定" + (i + 1) + (p.username ? '<span class="prof-user">' + esc(p.username) + "</span>" : "");
+      btn.classList.toggle("active", (state.active | 0) === i);
+      btn.title = "設定" + (i + 1) + " をアクティブにする" + (p.username ? "（" + p.username + "）" : "");
+    }
     const u = $("gh-username");
     if (document.activeElement !== u) u.value = state.username || "";
     const st = $("gh-settings-status");
     if (state.configured) {
-      st.textContent = "接続設定済み: " + state.username + "（トークン保存済み）";
+      st.textContent = "設定" + ((state.active | 0) + 1) + " 接続設定済み: " + state.username + "（トークン保存済み）";
       st.classList.add("ok");
       st.classList.remove("err");
     } else {
-      st.textContent = "未設定。ユーザー名と Personal Access Token を入力して保存してください。";
+      st.textContent = "設定" + ((state.active | 0) + 1) + " 未設定。ユーザー名と Personal Access Token を入力して保存してください。";
       st.classList.remove("ok", "err");
+    }
+  }
+
+  async function switchProfile(index) {
+    if ((state.active | 0) === index) return;
+    const btns = [$("gh-prof-1"), $("gh-prof-2")];
+    btns.forEach((b) => { if (b) b.disabled = true; });
+    try {
+      await API.github.setActive(index);
+      $("gh-username").value = "";
+      $("gh-token").value = "";
+      await refresh();
+      toast("設定" + (index + 1) + " に切り替えました");
+    } catch (e) {
+      toast(e.message, true);
+    } finally {
+      btns.forEach((b) => { if (b) b.disabled = false; });
     }
   }
 
@@ -183,7 +208,10 @@ const GithubPanel = (() => {
     try {
       const res = await API.github.saveSettings(username, token);
       $("gh-token").value = "";
-      state = { ...state, username, hasToken: true, configured: true };
+      const idx = state.active | 0;
+      const profiles = [...(state.profiles || [])];
+      profiles[idx] = { ...(profiles[idx] || {}), username, hasToken: true, configured: true };
+      state = { ...state, username, hasToken: true, configured: true, profiles };
       if (res.verified && res.user) {
         setSettingsStatus("接続OK: " + res.user.login + (res.user.name ? "（" + res.user.name + "）" : ""), true);
         toast("GitHub に接続しました: " + res.user.login);
@@ -214,14 +242,15 @@ const GithubPanel = (() => {
   }
 
   async function clearSettings() {
-    if (!confirm("GitHub 設定（ユーザー名・トークン）をクリアしますか？\n登録済みリポジトリは残ります。")) return;
+    const label = "設定" + ((state.active | 0) + 1);
+    if (!confirm(label + " の GitHub 設定（ユーザー名・トークン）をクリアしますか？\n登録済みリポジトリは残ります。")) return;
     try {
       await API.github.clearSettings();
       state = { ...state, username: "", hasToken: false, configured: false };
       $("gh-username").value = "";
       $("gh-token").value = "";
-      renderSettings();
-      toast("GitHub 設定をクリアしました");
+      await refresh();
+      toast(label + " の GitHub 設定をクリアしました");
     } catch (e) {
       toast(e.message, true);
     }
@@ -239,7 +268,14 @@ const GithubPanel = (() => {
   async function refresh() {
     try {
       const st = await API.github.status();
-      state = { configured: st.configured, username: st.username || "", hasToken: !!st.hasToken, repos: st.repos || [] };
+      state = {
+        configured: st.configured,
+        username: st.username || "",
+        hasToken: !!st.hasToken,
+        repos: st.repos || [],
+        active: st.active | 0,
+        profiles: st.profiles || [],
+      };
     } catch (e) {
       toast(e.message, true);
     }
@@ -1040,6 +1076,8 @@ const GithubPanel = (() => {
     $("gh-save").onclick = saveSettings;
     $("gh-check").onclick = checkConnection;
     $("gh-clear").onclick = clearSettings;
+    $("gh-prof-1").onclick = () => switchProfile(0);
+    $("gh-prof-2").onclick = () => switchProfile(1);
     $("gh-token-toggle").onclick = toggleTokenVisible;
     $("gh-git-save").onclick = saveGitConfig;
     $("gh-git-check").onclick = checkGitConfig;
@@ -1092,7 +1130,14 @@ const GithubPanel = (() => {
     // 成功したら表示内容も描画しておく（開いたときに refresh しなくて済む）。
     API.github.status()
       .then((st) => {
-        state = { configured: st.configured, username: st.username || "", hasToken: !!st.hasToken, repos: st.repos || [] };
+        state = {
+          configured: st.configured,
+          username: st.username || "",
+          hasToken: !!st.hasToken,
+          repos: st.repos || [],
+          active: st.active | 0,
+          profiles: st.profiles || [],
+        };
         loaded = true;
         renderSettings();
         renderRepos();

@@ -99,6 +99,7 @@ const API = (() => {
     github: {
       status: () => API.get("/api/github/status"),
       saveSettings: (username, token) => API.put("/api/github/settings", { username, token }),
+      setActive: (index) => API.post("/api/github/settings/active", { index }),
       clearSettings: () => API.del("/api/github/settings"),
       user: () => API.get("/api/github/user"),
       myRepos: () => API.get("/api/github/repos"),

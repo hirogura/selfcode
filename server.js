@@ -344,7 +344,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "2.8.3",
+    version: "2.9.0",
     bootId: BOOT_ID,
     workspace: ROOT,
     distro: DISTRO,
@@ -1424,17 +1424,29 @@ app.put("/api/chat/state", async (req, res, next) => {
 // 設定（ユーザー名・トークン・登録リポジトリ）はサーバー側の JSON に保存し、トークンをブラウザに返さない。
 // git 操作はワークスペース内（コンテナ内ではコンテナ側）で実行する。
 const GITHUB_CONFIG = process.env.SELFCODE_GITHUB_CONFIG || "/opt/lxd-data/note/selfcode/selfcode-github.json";
-let githubCfg = { username: "", token: "", repos: [] };
+// 設定1/設定2 の2プロファイルを保持し、アクティブな方を GitHub 連携（API・git 認証・リポジトリ登録）に使用する
+let githubCfg = { active: 0, settings: [{ username: "", token: "", repos: [] }, { username: "", token: "", repos: [] }] };
+
+function normalizeGithubData(d) {
+  const mk = (x) => ({
+    username: String((x && x.username) || ""),
+    token: String((x && x.token) || ""),
+    repos: Array.isArray(x && x.repos) ? x.repos : [],
+  });
+  const settings = [mk(d && d.settings && d.settings[0]), mk(d && d.settings && d.settings[1])];
+  // 旧形式（単一設定ファイル）は設定1に引き継ぐ
+  if (!Array.isArray(d && d.settings) && d && (d.username || d.token || (d.repos && d.repos.length))) {
+    settings[0] = mk(d);
+  }
+  const active = d && (d.active === 0 || d.active === 1) ? d.active : 0;
+  return { active, settings };
+}
 
 async function loadGithubConfig() {
   try {
     const raw = await fsp.readFile(GITHUB_CONFIG, "utf8");
     const d = JSON.parse(raw);
-    githubCfg = {
-      username: String((d && d.username) || ""),
-      token: String((d && d.token) || ""),
-      repos: Array.isArray(d && d.repos) ? d.repos : [],
-    };
+    githubCfg = normalizeGithubData(d);
   } catch {}
 }
 
@@ -1443,9 +1455,18 @@ async function saveGithubConfig() {
   await fsp.writeFile(GITHUB_CONFIG, JSON.stringify(githubCfg, null, 2));
 }
 
+// 現在アクティブな設定（設定1 / 設定2）
+function ghCur() {
+  if (!githubCfg.settings || githubCfg.settings.length !== 2) {
+    githubCfg = normalizeGithubData(githubCfg);
+  }
+  return githubCfg.settings[githubCfg.active];
+}
+
 // GitHub REST API（トークンはサーバー側でのみ使用）
 async function ghApi(p, opts = {}) {
-  if (!githubCfg.token) {
+  const cur = ghCur();
+  if (!cur.token) {
     const e = new Error("GitHub トークンが設定されていません");
     e.status = 400;
     throw e;
@@ -1455,7 +1476,7 @@ async function ghApi(p, opts = {}) {
     res = await fetch("https://api.github.com" + p, {
       method: opts.method || "GET",
       headers: {
-        authorization: "Bearer " + githubCfg.token,
+        authorization: "Bearer " + cur.token,
         accept: "application/vnd.github+json",
         "user-agent": "selfcode",
         "x-github-api-version": "2022-11-28",
@@ -1484,11 +1505,12 @@ async function ghApi(p, opts = {}) {
 // トークンを git の認証に使うための引数。ヘッダはそのコマンドの実行時だけ渡し、
 // .git/config には保存しない。送信先は github.com のみに限定する（他ホストへトークンを送らない）。
 function gitAuthArgs(url) {
-  if (!githubCfg.token || !String(url || "").includes("github.com")) return [];
+  const cur = ghCur();
+  if (!cur.token || !String(url || "").includes("github.com")) return [];
   // 登録済みユーザー名とPATを使う（GitHub は基本認証のユーザー名を検証しないため、
   // ユーザー名未登録時は慣例の x-access-token にフォールバックする）
-  const user = githubCfg.username || "x-access-token";
-  const auth = "basic " + Buffer.from(user + ":" + githubCfg.token).toString("base64");
+  const user = cur.username || "x-access-token";
+  const auth = "basic " + Buffer.from(user + ":" + cur.token).toString("base64");
   return ["-c", "credential.helper=", "-c", "core.askPass=true", "-c", "http.extraheader=AUTHORIZATION: " + auth];
 }
 
@@ -1689,26 +1711,36 @@ function sanitizeRel(p) {
   }
 }
 
-// 設定の状態（トークン自体は返さない）
+// 設定の状態（トークン自体は返さない。設定1/設定2 両方の状態とアクティブ番号を返す）
 app.get("/api/github/status", (req, res) => {
+  const cur = ghCur();
   res.json({
-    configured: !!(githubCfg.username && githubCfg.token),
-    username: githubCfg.username || null,
-    hasToken: !!githubCfg.token,
-    repos: githubCfg.repos.map((r) => ({ id: r.id, name: r.name, path: r.path, url: r.url })),
+    configured: !!(cur.username && cur.token),
+    username: cur.username || null,
+    hasToken: !!cur.token,
+    repos: cur.repos.map((r) => ({ id: r.id, name: r.name, path: r.path, url: r.url })),
+    active: githubCfg.active,
+    profiles: githubCfg.settings.map((s) => ({
+      configured: !!(s.username && s.token),
+      username: s.username || null,
+      hasToken: !!s.token,
+      reposCount: (s.repos || []).length,
+    })),
   });
 });
 
-// ユーザー名・トークンを保存（トークン欄が空で保存済みトークンがあれば既存を維持）。保存後に検証も行う。
+// ユーザー名・トークンを保存（アクティブな設定に対して適用。
+// トークン欄が空で保存済みトークンがあれば既存を維持）。保存後に検証も行う。
 app.put("/api/github/settings", async (req, res, next) => {
   try {
+    const cur = ghCur();
     const username = String(req.body.username || "").trim();
     let token = String(req.body.token || "").trim();
-    if (!token && githubCfg.token) token = githubCfg.token;
+    if (!token && cur.token) token = cur.token;
     if (!username) return res.status(400).json({ error: "ユーザー名を入力してください" });
     if (!token) return res.status(400).json({ error: "トークンを入力してください" });
-    githubCfg.username = username;
-    githubCfg.token = token;
+    cur.username = username;
+    cur.token = token;
     await saveGithubConfig();
     let user = null;
     let verifyErr = null;
@@ -1723,19 +1755,41 @@ app.put("/api/github/settings", async (req, res, next) => {
       verified: !!user,
       user: user ? { login: user.login, name: user.name } : null,
       error: verifyErr,
+      active: githubCfg.active,
     });
   } catch (e) {
     next(e);
   }
 });
 
-// 設定（ユーザー名・トークン）をクリア
+// アクティブな設定を切り替える（設定1 / 設定2）
+app.post("/api/github/settings/active", async (req, res, next) => {
+  try {
+    const index = req.body.index | 0;
+    if (index !== 0 && index !== 1) return res.status(400).json({ error: "index は 0 または 1 を指定してください" });
+    githubCfg.active = index;
+    await saveGithubConfig();
+    const cur = ghCur();
+    res.json({
+      ok: true,
+      active: index,
+      configured: !!(cur.username && cur.token),
+      username: cur.username || null,
+      hasToken: !!cur.token,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// 設定（ユーザー名・トークン）をクリア（アクティブな設定を対象）
 app.delete("/api/github/settings", async (req, res, next) => {
   try {
-    githubCfg.username = "";
-    githubCfg.token = "";
+    const cur = ghCur();
+    cur.username = "";
+    cur.token = "";
     await saveGithubConfig();
-    res.json({ ok: true, configured: false });
+    res.json({ ok: true, configured: false, active: githubCfg.active });
   } catch (e) {
     next(e);
   }
@@ -1944,7 +1998,7 @@ app.get("/api/github/repos", async (req, res, next) => {
 app.get("/api/github/repos/registered", async (req, res, next) => {
   try {
     const out = [];
-    for (const r of githubCfg.repos) {
+    for (const r of ghCur().repos) {
       let st = null;
       try {
         st = await repoGitStatus(r.path);
@@ -1998,7 +2052,7 @@ app.post("/api/github/repos", async (req, res, next) => {
     // （値は create/warn/always/never の列挙型。warn = HEAD 差異を警告＋無ければ作成）
     await runGit(target, ["config", "fetch.followRemoteHEAD", "warn"], 10000).catch(() => {});
     const repo = { id: githubRepoId(), name: defaultName, path: target, url };
-    githubCfg.repos.push(repo);
+    ghCur().repos.push(repo);
     await saveGithubConfig();
     res.json({ ok: true, repo });
   } catch (e) {
@@ -2034,11 +2088,11 @@ app.post("/api/github/repos/existing", async (req, res, next) => {
         return res.status(500).json({ error: "git init に失敗しました: " + (initR.stderr || "").trim() });
       }
     }
-    if (githubCfg.repos.some((r) => r.path === p)) return res.status(400).json({ error: "既に登録済みです: " + p });
+    if (ghCur().repos.some((r) => r.path === p)) return res.status(400).json({ error: "既に登録済みです: " + p });
     const origin = await gitOriginUrl(p).catch(() => "");
     const name = p.split("/").filter(Boolean).pop() || p || "repo";
     const repo = { id: githubRepoId(), name, path: p, url: origin };
-    githubCfg.repos.push(repo);
+    ghCur().repos.push(repo);
     await saveGithubConfig();
     res.json({ ok: true, repo });
   } catch (e) {
@@ -2051,7 +2105,7 @@ app.post("/api/github/repos/:id/action", async (req, res, next) => {
   try {
     const id = String(req.params.id || "");
     const action = String(req.body.action || "");
-    const repo = githubCfg.repos.find((r) => r.id === id);
+    const repo = ghCur().repos.find((r) => r.id === id);
     if (!repo) return res.status(404).json({ error: "リポジトリが見つかりません" });
     if (!["status", "fetch", "pull", "log", "commit", "cancel", "push", "force-push", "branch", "cleanup", "force-pull"].includes(action)) {
       return res.status(400).json({ error: "不明な操作です" });
@@ -2366,7 +2420,7 @@ const DEFAULT_GITIGNORE_TEMPLATE = [
 app.post("/api/github/repos/:id/gitignore", async (req, res, next) => {
   try {
     const id = String(req.params.id || "");
-    const repo = githubCfg.repos.find((r) => r.id === id);
+    const repo = ghCur().repos.find((r) => r.id === id);
     if (!repo) return res.status(404).json({ error: "リポジトリが見つかりません" });
     const target = (repo.path || "").replace(/\/+$/, "") + "/.gitignore";
     // 既に存在する場合は作成しない
@@ -2413,7 +2467,7 @@ const DEFAULT_AGENTS_MD_TEMPLATE = [
 app.post("/api/github/repos/:id/agents-md", async (req, res, next) => {
   try {
     const id = String(req.params.id || "");
-    const repo = githubCfg.repos.find((r) => r.id === id);
+    const repo = ghCur().repos.find((r) => r.id === id);
     if (!repo) return res.status(404).json({ error: "リポジトリが見つかりません" });
     const target = (repo.path || "").replace(/\/+$/, "") + "/AGENTS.md";
     // 既に存在する場合は作成しない
@@ -2504,7 +2558,7 @@ app.post("/api/github/templates/reset", async (req, res, next) => {
 app.post("/api/github/repos/:id/remote", async (req, res, next) => {
   try {
     const id = String(req.params.id || "");
-    const repo = githubCfg.repos.find((r) => r.id === id);
+    const repo = ghCur().repos.find((r) => r.id === id);
     if (!repo) return res.status(404).json({ error: "リポジトリが見つかりません" });
     const url = String(req.body.url || "").trim();
     const branch = String(req.body.branch || "main").trim() || "main";
@@ -2570,7 +2624,7 @@ app.post("/api/github/repos/:id/remote", async (req, res, next) => {
 app.post("/api/github/repos/:id/first-push", async (req, res, next) => {
   try {
     const id = String(req.params.id || "");
-    const repo = githubCfg.repos.find((r) => r.id === id);
+    const repo = ghCur().repos.find((r) => r.id === id);
     if (!repo) return res.status(404).json({ error: "リポジトリが見つかりません" });
     const url = String(req.body.url || "").trim();
     const branch = String(req.body.branch || "").trim() || "main";
@@ -2603,9 +2657,9 @@ app.post("/api/github/repos/:id/first-push", async (req, res, next) => {
 app.delete("/api/github/repos/:id", async (req, res, next) => {
   try {
     const id = String(req.params.id || "");
-    const before = githubCfg.repos.length;
-    githubCfg.repos = githubCfg.repos.filter((r) => r.id !== id);
-    if (githubCfg.repos.length === before) return res.status(404).json({ error: "リポジトリが見つかりません" });
+    const before = ghCur().repos.length;
+    ghCur().repos = ghCur().repos.filter((r) => r.id !== id);
+    if (ghCur().repos.length === before) return res.status(404).json({ error: "リポジトリが見つかりません" });
     await saveGithubConfig();
     res.json({ ok: true });
   } catch (e) {
