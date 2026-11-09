@@ -40,7 +40,13 @@ const BEACON_DATA_DIR = process.env.BEACON_DATA_DIR || "/opt/lxd-data/beacon";
 const BEACON_BIN_RAW = process.env.BEACON_BIN || "beacon";
 const BEACON_HARNESSES = process.env.BEACON_HARNESSES || "opencode,claude,codex,cline";
 const BEACON_SERVICE = process.env.BEACON_COLLECTOR_SERVICE || "beacon-collector";
-const MEMO_FILE = process.env.SELFCODE_MEMO || "/opt/lxd-data/note/selfcode/selfcode-memo.md";
+// selfcode が自分で管理するデータ（メモ・ターミナル状態・チャット状態・SSH状態・
+// GitHub 連携設定・テンプレート）の保存先ディレクトリ。
+// /opt/lxd-data/note は別アプリからも見える共有場所のため、専用ディレクトリへ分離する。
+const SELFCODE_CONFIG_DIR = process.env.SELFCODE_CONFIG_DIR || "/opt/lxd-data/selfcode-config";
+// 旧バージョン（v.2.9.x 以前）が使っていた保存先。起動時に新ディレクトリへ自動移行する。
+const LEGACY_CONFIG_DIR = process.env.SELFCODE_LEGACY_CONFIG_DIR || "/opt/lxd-data/note/selfcode";
+const MEMO_FILE = process.env.SELFCODE_MEMO || SELFCODE_CONFIG_DIR + "/selfcode-memo.md";
 const RESTART_CMD = process.env.SELFCODE_RESTART_CMD || "systemctl restart selfcode";
 const UPDATE_TIMEOUT_MS = Number(process.env.SELFCODE_UPDATE_TIMEOUT || 900000); // アップデートのタイムアウト（既定 15 分）
 const HIDDEN = new Set(["node_modules", ".git", "dist", "build", ".next", "__pycache__", ".venv", ".cache"]);
@@ -344,7 +350,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "2.9.1",
+    version: "3.0.0",
     bootId: BOOT_ID,
     workspace: ROOT,
     distro: DISTRO,
@@ -794,7 +800,7 @@ app.post("/api/beacon/install", (req, res) => {
 // パスワード認証・root ログインの一時有効化を行い、OFF で元に戻す。
 // ホストPCの場合はキーリング（D-Bus / Secret Service）を読み取れる環境変数設定も行う。
 // 状態はサーバー再起動後も保持する（ON のまま再起動しても復元対象を失わないように）。
-const SSH_TEMP_STATE_FILE = process.env.SELFCODE_SSH_STATE || "/opt/lxd-data/note/selfcode/selfcode-ssh.json";
+const SSH_TEMP_STATE_FILE = process.env.SELFCODE_SSH_STATE || SELFCODE_CONFIG_DIR + "/selfcode-ssh.json";
 let sshTemp = { on: false, target: null }; // target: { type: "container", name } | { type: "host" }
 
 // コンテナ内用の一時SSH有効化スクリプト（コンテナ内は既存動作のまま）
@@ -1363,8 +1369,8 @@ app.put("/api/memo", async (req, res, next) => {
 // ================= セッション状態の共有 =================
 // 別のPCから同じ selfcode を開いても同じセッション（ターミナル・チャット選択）に
 // 接続できるよう、ブラウザの localStorage にしか無かった状態をサーバー側にも保存する。
-const TERM_STATE_FILE = process.env.SELFCODE_TERM_STATE || "/opt/lxd-data/note/selfcode/selfcode-term.json";
-const CHAT_STATE_FILE = process.env.SELFCODE_CHAT_STATE || "/opt/lxd-data/note/selfcode/selfcode-chat.json";
+const TERM_STATE_FILE = process.env.SELFCODE_TERM_STATE || SELFCODE_CONFIG_DIR + "/selfcode-term.json";
+const CHAT_STATE_FILE = process.env.SELFCODE_CHAT_STATE || SELFCODE_CONFIG_DIR + "/selfcode-chat.json";
 
 // JSON ファイルを読み込む（無ければ fallback を返す）
 async function readStateFile(file, fallback) {
@@ -1423,7 +1429,7 @@ app.put("/api/chat/state", async (req, res, next) => {
 // ================= GitHub 連携 =================
 // 設定（ユーザー名・トークン・登録リポジトリ）はサーバー側の JSON に保存し、トークンをブラウザに返さない。
 // git 操作はワークスペース内（コンテナ内ではコンテナ側）で実行する。
-const GITHUB_CONFIG = process.env.SELFCODE_GITHUB_CONFIG || "/opt/lxd-data/note/selfcode/selfcode-github.json";
+const GITHUB_CONFIG = process.env.SELFCODE_GITHUB_CONFIG || SELFCODE_CONFIG_DIR + "/selfcode-github.json";
 // 設定1/設定2 の2プロファイルを保持し、アクティブな方を GitHub 連携（API・git 認証・リポジトリ登録）に使用する
 let githubCfg = { active: 0, settings: [{ username: "", token: "", repos: [] }, { username: "", token: "", repos: [] }] };
 
@@ -2394,7 +2400,7 @@ app.post("/api/github/repos/:id/action", async (req, res, next) => {
 
 // 登録済みリポジトリのルートに .gitignore / AGENTS.md を作成する際のテンプレート。
 // 「テンプレート」セクションから編集でき、サーバー側の JSON に保存する（未保存なら既定値を使う）。
-const TEMPLATES_CONFIG = process.env.SELFCODE_TEMPLATES_CONFIG || "/opt/lxd-data/note/selfcode/selfcode-templates.json";
+const TEMPLATES_CONFIG = process.env.SELFCODE_TEMPLATES_CONFIG || SELFCODE_CONFIG_DIR + "/selfcode-templates.json";
 const DEFAULT_GITIGNORE_TEMPLATE = [
   ".env",
   ".env.*",
@@ -3337,7 +3343,39 @@ wss.on("connection", (ws, req) => {
   }
 });
 
-loadGithubConfig().catch((e) => console.error("[selfcode] GitHub config load failed: " + e.message));
+// 旧保存先（/opt/lxd-data/note/selfcode）に置かれていた自己管理データを新ディレクトリへ移行する。
+// アップデートで新バージョン（v.3.0.0+）が起動しても設定を見失わないための処理。
+// 新側に未作成のファイルだけをコピーし（旧側のファイルは残す）、既存値を壊さない。
+const SELF_MANAGED_CONFIG_FILES = [
+  "selfcode-memo.md",
+  "selfcode-ssh.json",
+  "selfcode-term.json",
+  "selfcode-chat.json",
+  "selfcode-github.json",
+  "selfcode-templates.json",
+];
+
+async function migrateLegacyConfigFiles() {
+  for (const name of SELF_MANAGED_CONFIG_FILES) {
+    const from = LEGACY_CONFIG_DIR + "/" + name;
+    const to = SELFCODE_CONFIG_DIR + "/" + name;
+    try {
+      await fsp.access(to);
+      continue; // 新側に既にあるファイルは触らない（自分の環境で先に移行済みのケース）
+    } catch {}
+    try {
+      const raw = await fsp.readFile(from);
+      await fsp.mkdir(SELFCODE_CONFIG_DIR, { recursive: true });
+      await fsp.writeFile(to, raw);
+      console.log(`[selfcode] migrated config file: ${from} -> ${to}`);
+    } catch {}
+  }
+}
+
+migrateLegacyConfigFiles()
+  .catch((e) => console.error("[selfcode] legacy config migration failed: " + e.message))
+  .then(() => loadGithubConfig())
+  .catch((e) => console.error("[selfcode] GitHub config load failed: " + e.message));
 
 server.listen(PORT, HOST, () => {
   console.log(`[selfcode] listening on http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}`);
