@@ -64,14 +64,41 @@ pkg_install_hint() {
     echo "パッケージマネージャで git / curl / nodejs / npm をインストール"
   fi
 }
-for cmd in git curl node npm; do
-  command -v "$cmd" >/dev/null 2>&1 || die "'$cmd' が見つかりません。先にインストールしてください (例: $(pkg_install_hint))"
+# ---- 足りない前提パッケージの自動インストール ----
+# Debian/Ubuntu 系では eatmydata が使えれば apt の fsync 待ちが消え、
+# 大量の .deb 展開 (node 関連パッケージなど) が大幅に速くなる。
+MISSING=""
+for cmd in git curl node npm python3 make gcc; do
+  command -v "$cmd" >/dev/null 2>&1 || MISSING="$MISSING $cmd"
 done
-
-# node-pty (ターミナル用ネイティブモジュール) のビルドに必要
-for cmd in python3 make gcc; do
-  command -v "$cmd" >/dev/null 2>&1 || die "'$cmd' が見つかりません。node-pty のビルドに必要です。先にインストールしてください (Arch/CachyOS 例: sudo pacman -S --needed base-devel python / Ubuntu 例: sudo apt-get install -y build-essential python3)"
-done
+if [ -n "$MISSING" ]; then
+  map_pkgs() {
+    PKGS=""
+    for cmd in $MISSING; do
+      case "$cmd" in
+        node) PKGS="$PKGS nodejs" ;;
+        make|gcc) PKGS="$PKGS $1" ;;
+        *) PKGS="$PKGS $cmd" ;;
+      esac
+    done
+  }
+  if command -v apt-get >/dev/null 2>&1; then
+    map_pkgs build-essential
+    info "不足している依存パッケージをインストール中:$PKGS"
+    command -v eatmydata >/dev/null 2>&1 || maybe_sudo apt-get install -y eatmydata >/dev/null
+    if command -v eatmydata >/dev/null 2>&1; then
+      maybe_sudo eatmydata apt-get install -y $PKGS
+    else
+      maybe_sudo apt-get install -y $PKGS
+    fi
+  elif command -v pacman >/dev/null 2>&1; then
+    map_pkgs base-devel
+    info "不足している依存パッケージをインストール中:$PKGS"
+    maybe_sudo pacman -S --needed --noconfirm $PKGS
+  else
+    die "不足コマンド:$MISSING 先にインストールしてください (例: $(pkg_install_hint))"
+  fi
+fi
 
 NODE_MAJOR="$(node -e 'console.log(process.versions.node.split(".")[0])')"
 if [ "$NODE_MAJOR" -lt 18 ]; then
@@ -106,11 +133,16 @@ maybe_sudo sh -c "cd '$INSTALL_DIR' && npm install --no-audit --no-fund"
 # ビルド (node-gyp rebuild) がスキップされて起動時に落ちることがある。
 # package.json の allowScripts で許可済みだが、念のため明示的に承認・再ビルドする
 # (古い npm には install-scripts サブコマンドが無いためガードする)。
-if (maybe_sudo sh -c "cd '$INSTALL_DIR' && npm install-scripts --help >/dev/null 2>&1"); then
-  info "node-pty のインストールスクリプトを承認・再ビルド中..."
-  maybe_sudo sh -c "cd '$INSTALL_DIR' && npm install-scripts approve node-pty >/dev/null && npm rebuild node-pty --no-audit --no-fund"
+# pty.node が既にあれば node-gyp の再コンパイルを飛ばして更新を高速化する
+if [ -f "$INSTALL_DIR/node_modules/node-pty/build/Release/pty.node" ]; then
+  info "node-pty は既にビルド済みのため再ビルドをスキップします"
 else
-  maybe_sudo sh -c "cd '$INSTALL_DIR' && npm rebuild node-pty --no-audit --no-fund"
+  if (maybe_sudo sh -c "cd '$INSTALL_DIR' && npm install-scripts --help >/dev/null 2>&1"); then
+    info "node-pty のインストールスクリプトを承認・再ビルド中..."
+    maybe_sudo sh -c "cd '$INSTALL_DIR' && npm install-scripts approve node-pty >/dev/null && npm rebuild node-pty --no-audit --no-fund"
+  else
+    maybe_sudo sh -c "cd '$INSTALL_DIR' && npm rebuild node-pty --no-audit --no-fund"
+  fi
 fi
 # ビルド成果物が無ければここで失敗させる (起動時の分かりにくいクラッシュを防ぐ)
 if [ ! -f "$INSTALL_DIR/node_modules/node-pty/build/Release/pty.node" ]; then

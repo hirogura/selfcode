@@ -27,7 +27,9 @@ code-server のようにブラウザから使えて、opencodeやFreebuff、Goog
 Ubuntu / Debian 系:
 
 ```bash
-sudo apt install -y git curl nodejs npm build-essential python3
+# eatmydata 経由にすると apt の .deb 展開 (node 関連パッケージ等) が大幅に速くなります
+sudo apt install -y eatmydata
+sudo eatmydata apt install -y git curl nodejs npm build-essential python3
 curl -fsSL https://raw.githubusercontent.com/hirogura/selfcode/main/install-selfcode.sh -o /tmp/install-selfcode.sh
 sudo bash /tmp/install-selfcode.sh
 ```
