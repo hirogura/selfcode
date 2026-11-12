@@ -350,7 +350,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "3.2.0",
+    version: "3.2.1",
     bootId: BOOT_ID,
     workspace: ROOT,
     distro: DISTRO,
@@ -3202,14 +3202,17 @@ wss.on("connection", (ws, req) => {
         cwd = dir;
         const home = userHomeOf(procUser);
         procEnv = { ...procEnv, ...keyringEnv, HOME: home, USER: procUser, LOGNAME: procUser, SHELL: procCmd };
-        // ~/.local/bin にインストールされる CLI（Antigravity CLI など）を直接起動できるように PATH にも追加する
-        procEnv = { ...procEnv, PATH: `${home}/.local/bin:${procEnv.PATH}` };
+        // opencode は ~/.opencode/bin、Antigravity CLI などは ~/.local/bin にインストールされる。
+        // root の PATH（/root/.opencode/bin）は一般ユーザーから辿れないため、実行ユーザーのものを先頭に追加する。
+        procEnv = { ...procEnv, PATH: `${home}/.opencode/bin:${home}/.local/bin:${procEnv.PATH}` };
       } else {
         bin = procCmd;
         args = procArgs || [];
         cwd = dir;
-        // 同上: 実行ユーザーの ~/.local/bin を PATH に追加（インストール済みの agy などを直接起動できるように）
-        procEnv = { ...procEnv, ...keyringEnv, PATH: `${userHomeOf(curUser)}/.local/bin:${procEnv.PATH}` };
+        // 同上: 実行ユーザーの ~/.opencode/bin と ~/.local/bin を PATH に追加
+        // （opencode と agy などを、シェルの設定ファイルに依存せず直接起動できるように）
+        const home = userHomeOf(curUser);
+        procEnv = { ...procEnv, ...keyringEnv, PATH: `${home}/.opencode/bin:${home}/.local/bin:${procEnv.PATH}` };
       }
     }
     const child = pty.spawn(bin, args, {
