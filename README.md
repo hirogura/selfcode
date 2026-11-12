@@ -62,7 +62,7 @@ sudo npm install
 
 ```bash
 # opencode（公式インストーラ。~/.opencode/bin/opencode に導入される）
-curl -fsSL https://opencode.ai/install | bash
+curl -fsSL https://opencode.ai/v2/install | bash
 
 # freebuff（npm グローバル）
 sudo npm install -g freebuff

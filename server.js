@@ -350,7 +350,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "3.1.0",
+    version: "3.2.0",
     bootId: BOOT_ID,
     workspace: ROOT,
     distro: DISTRO,
@@ -2754,7 +2754,7 @@ function containerBin(runtime) {
 // install はシェルスクリプトに埋め込まれるため、単一のコマンドラインで書くこと。
 const INSTALL_CMDS = {
   opencode:
-    'export PATH="$HOME/.opencode/bin:$PATH"; curl -fsSL https://opencode.ai/install | bash; if [ "$(id -u)" = "0" ] && [ -f /root/.opencode/bin/opencode ]; then cp -f /root/.opencode/bin/opencode /usr/local/bin/opencode 2>/dev/null && chmod 755 /usr/local/bin/opencode 2>/dev/null || true; fi',
+    'export PATH="$HOME/.opencode/bin:$PATH"; curl -fsSL https://opencode.ai/v2/install | bash; if [ "$(id -u)" = "0" ] && [ -f /root/.opencode/bin/opencode ]; then cp -f /root/.opencode/bin/opencode /usr/local/bin/opencode 2>/dev/null && chmod 755 /usr/local/bin/opencode 2>/dev/null || true; fi',
   // freebuff / cline は npm グローバルインストール。npm / node が無い環境（LXD コンテナ等）でも
   // パッケージマネージャ（pacman / apt / apk / dnf / yum）から nodejs / npm を自動インストールしてから進める。
   // freebuff CLI は Node.js 18+ 必須のため、バージョンも確認する。
