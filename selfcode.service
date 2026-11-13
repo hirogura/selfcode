@@ -17,7 +17,6 @@ Environment=HOME=/root
 # Environment=ROOT=/home/user/myproject
 # Environment=SELFCODE_PASSWORD=change-me
 # Environment=SELFCODE_USERNAME=admin
-# Environment=OPENCODE_SERVER_PASSWORD=change-me
 # Environment=OPENCODE_BIN=/root/.opencode/bin/opencode
 # beacon.sh (Agent Beacon) のデータ置き場（AI設定パネルの beacon.sh カードで管理する。変える場合は値を書き換える）
 Environment=BEACON_DATA_DIR=/opt/lxd-data/beacon

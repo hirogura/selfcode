@@ -11,11 +11,9 @@ const App = (() => {
     main: $("main"),
     terminal: $("terminal"),
     terminalWorkspace: $("terminal-workspace"),
-    chat: $("chat"),
-    chatContent: $("chat-content"),
+    memoPanel: $("memo-panel"),
     github: $("github"),
     aibridge: $("aibridge"),
-    status: $("oc-status"),
     memo: $("memo"),
     memoInput: $("memo-input"),
   };
@@ -127,8 +125,6 @@ const App = (() => {
     onTermExit: (fn) => addTermExitListener(fn),
     // aibridge.js などからも使える共通通知 API（トースト＋OS通知＋タイトル点滅＋着信音）
     notify: (title, body) => browserNotify(title, body),
-    // チャットパネルの入力待ち通知用（「通知表示」チェックがONのときだけ通知）
-    notifyIfEnabled: (title, body) => { if (notifyEnabled()) browserNotify(title, body); },
   };
 
   async function openFile(path) {
@@ -378,10 +374,6 @@ const App = (() => {
     return m;
   }
 
-  function absDir(p) {
-    return workspace === "/" ? "/" + (p || "") : workspace + "/" + (p || "");
-  }
-
   function showMenu(x, y, target) {
     const menu = ctxMenuEl();
     menu.innerHTML = "";
@@ -391,7 +383,6 @@ const App = (() => {
       items.push({ label: "開く", act: () => openFile(target.path) });
       items.push({ label: "リネーム", act: () => rename(target.path, target.dir) });
       items.push({ sep: true });
-      items.push({ label: "ここでチャット", act: () => Chat.setDirectory(absDir(target.dir)) });
       items.push({ label: "ここで opencode", act: () => openOpencodeAt(target.dir) });
       items.push({ label: "ここで cline", act: () => openClineAt(target.dir) });
       items.push({ label: "ここで freebuff", act: () => openFreebuffAt(target.dir) });
@@ -406,7 +397,6 @@ const App = (() => {
       items.push({ label: "ファイル作成", act: () => createFile(target.path) });
       items.push({ label: "フォルダ作成", act: () => createFolder(target.path) });
       items.push({ sep: true });
-      items.push({ label: "ここでチャット", act: () => Chat.setDirectory(absDir(target.path)) });
       items.push({ label: "ここで opencode", act: () => openOpencodeAt(target.path) });
       items.push({ label: "ここで cline", act: () => openClineAt(target.path) });
       items.push({ label: "ここで freebuff", act: () => openFreebuffAt(target.path) });
@@ -2098,14 +2088,6 @@ const App = (() => {
     return Math.max(TERM_H_MIN + 1, $("layout").clientHeight - els.tabs.offsetHeight - 5);
   }
 
-  const MEMO_H_KEY = "selfcode.memoHeight";
-  const MEMO_H_MIN = 60;
-  const MEMO_CHAT_MIN = 120;
-  // メモは opencode 側に最低限の高さを残す範囲で伸縮できる
-  function memoMaxH() {
-    return Math.max(MEMO_H_MIN + 1, els.chat.clientHeight - MEMO_CHAT_MIN);
-  }
-
   function initResizers() {
     const layout = $("layout");
     const state = { mode: null, startX: 0, startY: 0, startW: 0, startH: 0 };
@@ -2117,20 +2099,14 @@ const App = (() => {
       els.terminal.style.height = clamp(saved, TERM_H_MIN, termMaxH()) + "px";
     }
 
-    // 保存済みのメモ高さを復元（ターミナル同様に上限でクランプ）
-    const savedMemo = parseFloat(localStorage.getItem(MEMO_H_KEY));
-    if (savedMemo > 0) {
-      els.memo.style.height = clamp(savedMemo, MEMO_H_MIN, memoMaxH()) + "px";
-    }
-
     const onMove = (e) => {
       if (!state.mode) return;
       if (state.mode === "sidebar") {
         const w = clamp(state.startW + (e.clientX - state.startX), 180, layout.clientWidth * 0.5);
         els.sidebar.style.width = w + "px";
-      } else if (state.mode === "chat") {
+      } else if (state.mode === "memo-panel") {
         const w = clamp(state.startW + (state.startX - e.clientX), 280, layout.clientWidth * 0.6);
-        els.chat.style.width = w + "px";
+        els.memoPanel.style.width = w + "px";
       } else if (state.mode === "github") {
         const w = clamp(state.startW + (state.startX - e.clientX), 280, layout.clientWidth * 0.6);
         els.github.style.width = w + "px";
@@ -2145,18 +2121,11 @@ const App = (() => {
       } else if (state.mode === "terminal") {
         const h = clamp(state.startH + (state.startY - e.clientY), TERM_H_MIN, termMaxH());
         els.terminal.style.height = h + "px";
-      } else if (state.mode === "memo") {
-        // メモは区切り線の上にあるため、ターミナル（区切り線の下）とは向きが逆：
-        // 上に引くと opencode 側（下のパネル）が広がり、区切り線がマウスに追従する
-        const h = clamp(state.startH + (e.clientY - state.startY), MEMO_H_MIN, memoMaxH());
-        els.memo.style.height = h + "px";
       }
     };
     const onUp = () => {
       if (state.mode === "terminal") {
         localStorage.setItem(TERM_H_KEY, els.terminal.style.height);
-      } else if (state.mode === "memo") {
-        localStorage.setItem(MEMO_H_KEY, els.memo.style.height);
       }
       state.mode = null;
       document.body.classList.remove("resizing-v", "resizing-h");
@@ -2172,7 +2141,7 @@ const App = (() => {
       state.startW = r.width;
       state.startH = r.height;
       e.preventDefault();
-      document.body.classList.add(mode === "terminal" || mode === "memo" ? "resizing-h" : "resizing-v");
+      document.body.classList.add(mode === "terminal" ? "resizing-h" : "resizing-v");
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
     };
@@ -2181,54 +2150,16 @@ const App = (() => {
     $("divider-github").addEventListener("pointerdown", (e) => begin(e, "github", els.github));
     $("divider-aibridge").addEventListener("pointerdown", (e) => begin(e, "aibridge", $("aibridge")));
     $("divider-aisettings").addEventListener("pointerdown", (e) => begin(e, "aisettings", $("aisettings")));
-    $("divider-chat").addEventListener("pointerdown", (e) => begin(e, "chat", els.chat));
+    $("divider-memo-panel").addEventListener("pointerdown", (e) => begin(e, "memo-panel", els.memoPanel));
     $("divider-terminal").addEventListener("pointerdown", (e) => begin(e, "terminal", els.terminal));
-    $("divider-memo").addEventListener("pointerdown", (e) => begin(e, "memo", els.memo));
   }
 
 
-  // パネル全体（#chat）は opencode 本体かメモのどちらかが表示されていれば出す
-  function syncChatPanel() {
-    const shown = !els.chatContent.classList.contains("hidden") || !els.memo.classList.contains("hidden");
-    els.chat.classList.toggle("hidden", !shown);
-    $("divider-chat").classList.toggle("hidden", !shown);
-    // memo と opencode の区切り線は両方表示されているときだけ出す
-    const both = !els.chatContent.classList.contains("hidden") && !els.memo.classList.contains("hidden");
-    $("divider-memo").classList.toggle("hidden", !both);
-    // opencode を隠しているときはメモがパネル全体に広がる
-    els.memo.classList.toggle("stretch", els.chatContent.classList.contains("hidden"));
-  }
-
-  let chatInitialized = false;
-  async function initChatOnce() {
-    if (chatInitialized) return;
-    chatInitialized = true;
-    try { await Chat.init(); } catch (e) { console.error("Chat init failed", e); }
-  }
-
-  async function toggleChat() {
-    const hiding = els.chatContent.classList.toggle("hidden");
-    $("btn-chat").classList.toggle("active", !els.chatContent.classList.contains("hidden"));
-    syncChatPanel();
-    if (!els.chatContent.classList.contains("hidden")) {
-      // opencode がインストールされていない場合は、ターミナルでインストールする
-      try {
-        const check = await API.get("/api/opencode/check");
-        if (check && !check.installed) {
-          els.chatContent.classList.add("hidden");
-          $("btn-chat").classList.remove("active");
-          syncChatPanel();
-          openOpencodeTerminal();
-          return;
-        }
-      } catch (e) {
-        // チェックに失敗してもチャットを開く（サーバー側で自動起動のため）
-      }
-      initChatOnce();
-    } else {
-      Chat.stop();
-      API.oc.stop().catch(() => {});
-    }
+  // メモパネルはメモが表示されているときだけ出す
+  function syncMemoPanel() {
+    const shown = !els.memo.classList.contains("hidden");
+    els.memoPanel.classList.toggle("hidden", !shown);
+    $("divider-memo-panel").classList.toggle("hidden", !shown);
   }
 
   // ---- エクスプローラ / エディタの表示切替（ツールバー左端のボタン） ----
@@ -2387,7 +2318,7 @@ const App = (() => {
   function showMemoPanel() {
     els.memo.classList.remove("hidden");
     $("btn-memo").classList.add("active");
-    syncChatPanel();
+    syncMemoPanel();
     try { localStorage.setItem(MEMO_VISIBLE_KEY, "1"); } catch {}
     if (!memoLoaded) {
       memoLoaded = true;
@@ -2404,7 +2335,7 @@ const App = (() => {
   function hideMemoPanel() {
     els.memo.classList.add("hidden");
     $("btn-memo").classList.remove("active");
-    syncChatPanel();
+    syncMemoPanel();
     try { localStorage.setItem(MEMO_VISIBLE_KEY, "0"); } catch {}
   }
 
@@ -2660,7 +2591,7 @@ const App = (() => {
     // エディタ領域の大きさが変わったら（ターミナル開閉・高さ変更）説明の表示状態を更新する
     new ResizeObserver(updateEmptyState).observe(els.editorHost);
     initResizers();
-    // 表示状態を復元（メモのみ。opencode チャットは毎回非表示で開始する）
+    // 表示状態を復元（メモ）
     if (localStorage.getItem(MEMO_VISIBLE_KEY) === "1") showMemoPanel();
     try {
       const st = await API.status();
@@ -2669,7 +2600,6 @@ const App = (() => {
       termUser = st.termUser || "root";
       termIsRoot = !!st.termIsRoot;
       updateContainerUI();
-      if (st.opencode && st.opencode.ready) els.status.classList.add("connected");
     } catch (e) {
       console.error(e);
     }
@@ -2689,7 +2619,6 @@ const App = (() => {
     $("btn-explorer").onclick = toggleExplorer;
     $("btn-editor").onclick = toggleEditorPanel;
     $("btn-terminal").onclick = toggleTerminal;
-    $("btn-chat").onclick = toggleChat;
     $("btn-freebuff").onclick = openFreebuffTerminal;
     $("btn-cline").onclick = openClineTerminal;
     $("btn-opencode").onclick = openOpencodeTerminal;
@@ -2823,10 +2752,7 @@ const App = (() => {
     });
 
     document.addEventListener("keydown", (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
-        e.preventDefault();
-        toggleChat();
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "j") {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "j") {
         e.preventDefault();
         toggleTerminal();
       }
@@ -2836,11 +2762,6 @@ const App = (() => {
       // ウィンドウが小さくなった場合にターミナルが画面外にはみ出さないよう高さを上限でクランプ
       const cur = parseFloat(els.terminal.style.height) || 0;
       if (cur > termMaxH()) els.terminal.style.height = termMaxH() + "px";
-      // メモも同様に、chat パネル表示中は上限でクランプしてはみ出しを防ぐ
-      if (!els.chat.classList.contains("hidden")) {
-        const curMemo = parseFloat(els.memo.style.height) || 0;
-        if (curMemo > memoMaxH()) els.memo.style.height = memoMaxH() + "px";
-      }
       fitAll();
     });
 

@@ -3,7 +3,6 @@ import crypto from "node:crypto";
 import fsp from "node:fs/promises";
 import fs from "node:fs";
 import path from "node:path";
-import net from "node:net";
 import os from "node:os";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -31,8 +30,6 @@ const HOST = process.env.HOST || "127.0.0.1";
 const ROOT = path.resolve(process.env.ROOT || "/");
 const SELF_USER = process.env.SELFCODE_USERNAME || "selfcode";
 const SELF_PASS = process.env.SELFCODE_PASSWORD || "";
-const OC_USER = process.env.OPENCODE_SERVER_USERNAME || "opencode";
-const OC_PASS = process.env.OPENCODE_SERVER_PASSWORD || "";
 const OC_BIN_RAW = process.env.OPENCODE_BIN || "opencode";
 // beacon.sh (Agent Beacon): AIコーディングエージェントの共通記憶層。
 // 収集データの置き場と CLI の所在は環境変数で上書きできる（既定は /opt/lxd-data/beacon）。
@@ -40,7 +37,7 @@ const BEACON_DATA_DIR = process.env.BEACON_DATA_DIR || "/opt/lxd-data/beacon";
 const BEACON_BIN_RAW = process.env.BEACON_BIN || "beacon";
 const BEACON_HARNESSES = process.env.BEACON_HARNESSES || "opencode,claude,codex,cline";
 const BEACON_SERVICE = process.env.BEACON_COLLECTOR_SERVICE || "beacon-collector";
-// selfcode が自分で管理するデータ（メモ・ターミナル状態・チャット状態・SSH状態・
+// selfcode が自分で管理するデータ（メモ・ターミナル状態・SSH状態・
 // GitHub 連携設定・テンプレート）の保存先ディレクトリ。
 // /opt/lxd-data/note は別アプリからも見える共有場所のため、専用ディレクトリへ分離する。
 const SELFCODE_CONFIG_DIR = process.env.SELFCODE_CONFIG_DIR || "/opt/lxd-data/selfcode-config";
@@ -138,153 +135,11 @@ try {
 }
 
 const app = express();
-app.use((req, res, next) => {
-  if (req.path.startsWith("/opencode")) return next();
-  return express.json({ limit: "64mb" })(req, res, next);
-});
-
-const oc = { port: null, password: OC_PASS, ready: false, child: null, version: null, manualStop: false };
+app.use(express.json({ limit: "64mb" }));
 
 // プロセス起動ごとに変わる識別子。クライアントが再起動の完了（新プロセスへの置き換わり）を
 // 検知するために /api/status で返す（単なる死活では短い再起動を見逃すため）。
 const BOOT_ID = Date.now().toString(36) + "-" + process.pid + "-" + crypto.randomBytes(4).toString("hex");
-
-function findFreePort() {
-  return new Promise((resolve, reject) => {
-    const srv = net.createServer();
-    srv.once("error", reject);
-    srv.listen(0, "127.0.0.1", () => {
-      const port = srv.address().port;
-      srv.close(() => resolve(port));
-    });
-  });
-}
-
-async function startOpencode() {
-  if (oc.manualStop) return; // 手動停止済みなら再起動しない
-  if (oc.child) return; // 既に起動済み
-  // root で動いている場合、PATH にユーザーの ~/.opencode/bin が含まれないため、
-  // findBin でフルパスを解決する
-  const termHome = TERM_USER ? userHomeOf(TERM_USER) : null;
-  const binPath = findBin(OC_BIN_RAW, process.env.PATH || "", termHome) || OC_BIN_RAW;
-  const port = await findFreePort();
-  if (!oc.password) oc.password = crypto.randomBytes(24).toString("base64url");
-  const env = { ...process.env, OPENCODE_SERVER_PASSWORD: oc.password, OPENCODE_SERVER_USERNAME: OC_USER };
-  const child = spawn(binPath, ["serve", "--hostname", "127.0.0.1", "--port", String(port), "--print-logs"], {
-    env,
-    cwd: ROOT,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  oc.child = child;
-  child.on("error", (err) => {
-    console.error(`[selfcode] opencode 起動エラー: ${err.message}`);
-    oc.ready = false;
-    oc.port = null;
-    oc.child = null;
-  });
-  child.stdout.on("data", (d) => {
-    const m = String(d).match(/listening on (http:\/\/[^\s]+)/);
-    if (m) {
-      oc.port = new URL(m[1]).port;
-      oc.ready = true;
-      console.log(`[selfcode] opencode ready on 127.0.0.1:${oc.port}`);
-    }
-  });
-  child.stderr.on("data", (d) => process.stderr.write(`[opencode] ${String(d).trimEnd()}\n`));
-  child.on("exit", (code) => {
-    oc.ready = false;
-    oc.port = null;
-    if (oc.manualStop) {
-      console.log(`[selfcode] opencode stopped manually (${code})`);
-      return;
-    }
-    console.log(`[selfcode] opencode exited (${code}), restarting in 3s`);
-    setTimeout(startOpencode, 3000);
-  });
-}
-
-function stopOpencode() {
-  if (!oc.child) return;
-  oc.manualStop = true;
-  try { oc.child.kill("SIGTERM"); } catch {}
-  oc.child = null;
-  oc.ready = false;
-  oc.port = null;
-  console.log("[selfcode] opencode stopped");
-}
-
-async function waitOpencode() {
-  if (oc.ready) return;
-  oc.manualStop = false; // プロキシ要求時 = チャットパネルが開かれたので再起動を許可
-  startOpencode(); // 未起動なら起動する
-  await new Promise((resolve) => {
-    const t = setInterval(() => {
-      if (oc.ready) {
-        clearInterval(t);
-        resolve();
-      }
-    }, 250);
-    setTimeout(() => {
-      clearInterval(t);
-      resolve();
-    }, 60000);
-  });
-}
-
-const ocAuthHeader = () => "Basic " + Buffer.from(`${OC_USER}:${oc.password}`).toString("base64");
-
-function proxyOpencode(req, res, next) {
-  if (req.method === "OPTIONS") {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "*");
-    return res.sendStatus(204);
-  }
-  if (!oc.ready) {
-    waitOpencode().then(() => {
-      if (oc.ready) doProxy(req, res);
-      else res.status(503).json({ error: "opencode server not ready" });
-    });
-    return;
-  }
-  doProxy(req, res);
-}
-
-function doProxy(req, res) {
-  const target = new URL(req.originalUrl.replace(/^\/opencode\/?/, "/") || "/", `http://127.0.0.1:${oc.port}`);
-  const headers = { ...req.headers, host: target.host, authorization: ocAuthHeader() };
-  const isEvent = String(req.url).includes("/event");
-  const upstream = http.request(
-    {
-      hostname: target.hostname,
-      port: target.port,
-      path: target.pathname + target.search,
-      method: req.method,
-      headers,
-      agent: isEvent ? false : undefined,
-    },
-    (up) => {
-      const fwd = { ...up.headers };
-      delete fwd["connection"];
-      delete fwd["keep-alive"];
-      delete fwd["transfer-encoding"];
-      delete fwd["content-length"];
-      res.writeHead(up.statusCode || 502, fwd);
-      up.pipe(res);
-    }
-  );
-  upstream.on("error", () => {
-    if (!res.headersSent) res.status(502).json({ error: "opencode proxy error" });
-    else res.destroy();
-  });
-  req.pipe(upstream);
-  const cleanup = () => upstream.destroy();
-  res.on("close", cleanup);
-  req.on("aborted", cleanup);
-  upstream.on("close", () => {
-    if (!res.writableEnded) res.destroy();
-  });
-}
 
 function resolveRel(p) {
   const rel = String(p || "").replace(/^\/+/, "");
@@ -350,30 +205,14 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "3.2.1",
+    version: "3.3.0",
     bootId: BOOT_ID,
     workspace: ROOT,
     distro: DISTRO,
     container: containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null,
-    opencode: { ready: oc.ready, version: oc.version },
     termUser: TERM_USER,
     termIsRoot: IS_ROOT,
   });
-});
-
-app.post("/api/opencode/stop", (req, res) => {
-  stopOpencode();
-  res.json({ ok: true });
-});
-
-// opencode がインストールされているかどうかを返す
-app.get("/api/opencode/check", (req, res) => {
-  // root で動いている場合、process.env.HOME は /root になるが、
-  // ターミナルユーザーのホーム（例: /home/user）にもインストールされることがあるため、
-  // 両方のホームディレクトリを検出対象にする
-  const termHome = TERM_USER ? userHomeOf(TERM_USER) : null;
-  const installed = !!findBin("opencode", process.env.PATH || "", termHome);
-  res.json({ installed });
 });
 
 // ================= beacon.sh（AIエージェントの共通記憶層） =================
@@ -1367,10 +1206,9 @@ app.put("/api/memo", async (req, res, next) => {
 });
 
 // ================= セッション状態の共有 =================
-// 別のPCから同じ selfcode を開いても同じセッション（ターミナル・チャット選択）に
+// 別のPCから同じ selfcode を開いても同じセッション（ターミナル）に
 // 接続できるよう、ブラウザの localStorage にしか無かった状態をサーバー側にも保存する。
 const TERM_STATE_FILE = process.env.SELFCODE_TERM_STATE || SELFCODE_CONFIG_DIR + "/selfcode-term.json";
-const CHAT_STATE_FILE = process.env.SELFCODE_CHAT_STATE || SELFCODE_CONFIG_DIR + "/selfcode-chat.json";
 
 // JSON ファイルを読み込む（無ければ fallback を返す）
 async function readStateFile(file, fallback) {
@@ -1401,25 +1239,6 @@ app.put("/api/term/state", async (req, res, next) => {
     const state = req.body && req.body.state;
     if (state === undefined) return res.status(400).json({ error: "state required" });
     await writeStateFile(TERM_STATE_FILE, state);
-    res.json({ ok: true });
-  } catch (e) {
-    next(e);
-  }
-});
-
-// チャットパネルで選択中の opencode セッションとワークスペース（ディレクトリ）
-app.get("/api/chat/state", async (req, res, next) => {
-  try {
-    res.json(await readStateFile(CHAT_STATE_FILE, {}));
-  } catch (e) {
-    next(e);
-  }
-});
-
-app.put("/api/chat/state", async (req, res, next) => {
-  try {
-    const { sessionId, directory } = req.body || {};
-    await writeStateFile(CHAT_STATE_FILE, { sessionId: sessionId || null, directory: directory || "" });
     res.json({ ok: true });
   } catch (e) {
     next(e);
@@ -3024,7 +2843,6 @@ app.use("/xterm", express.static(path.join(__dirname, "node_modules/@xterm/xterm
 app.use("/xterm-css", express.static(path.join(__dirname, "node_modules/@xterm/xterm/css")));
 app.use("/xterm-fit", express.static(path.join(__dirname, "node_modules/@xterm/addon-fit/lib")));
 
-app.use("/opencode", proxyOpencode);
 app.use(express.static(path.join(__dirname, "public")));
 
 app.use((err, req, res, next) => {
@@ -3353,7 +3171,6 @@ const SELF_MANAGED_CONFIG_FILES = [
   "selfcode-memo.md",
   "selfcode-ssh.json",
   "selfcode-term.json",
-  "selfcode-chat.json",
   "selfcode-github.json",
   "selfcode-templates.json",
 ];
@@ -3384,14 +3201,10 @@ server.listen(PORT, HOST, () => {
   console.log(`[selfcode] listening on http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}`);
   console.log(`[selfcode] root: ${ROOT}`);
   if (SELF_PASS) console.log(`[selfcode] basic auth enabled (user: ${SELF_USER})`);
-  // opencode はチャットパネルが開かれたとき（プロキシ初回要求時）に自動起動する
 });
 
 function shutdown() {
   console.log("\n[selfcode] shutting down");
-  try {
-    oc.child && oc.child.kill("SIGTERM");
-  } catch {}
   for (const r of terminals.values()) {
     try {
       r.term.kill();

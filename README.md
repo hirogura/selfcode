@@ -5,15 +5,12 @@ code-server のようにブラウザから使えて、opencodeやFreebuff、Goog
 - Monaco エディタ（VS Code と同じエディタエンジン）
 - ファイルツリー / タブ編集 / 保存（Ctrl+S）
 - xterm.js ターミナル（**分割**・**ユーザー切替**・**リフレッシュ**対応）
-- opencode チャットパネル（AI がワークスペース内のファイルを直接編集）
 - **opencode / freebuff / agy (Antigravity CLI)** ボタンでターミナルを分割して CLI を起動（未インストールなら確認して自動インストール）
 - **一時SSH** ボタンで、agy などの OAuth 認証を手元 PC から行えるよう SSH のパスワード認証・root ログインを一時的に有効化（もう一度押すと解除）
 - **通知表示**（AI設定パネル）チェックボックスで、AI ツールのタスク完了時や質問・承認確認など入力待ちの発生時にページ内トーストで通知（ブラウザ通知が許可されていればブラウザ通知も併用）
-- **チャットパネルのタスク完了通知**: opencode server のイベントストリーム（`/event` SSE）で配信されるセッション状態（`session.status`）の **busy → idle 遷移** を検知して、他のタブを見ている間でもチャットのタスク完了を通知する（イベントが取得できない環境では、assistant メッセージの `time.completed` によるフォールバック検知）
 - **beacon.sh (Agent Beacon) 連携**（AI設定パネルの beacon.sh カード）： opencode / Claude Code / Codex など 20+ ハーネスのセッションをローカルに集約する共通記憶層。状態表示・再起動・記憶フォルダを開く・オンデマンドインストールが UI から可能。コンテナ（lxc / docker exec の対象）を表示中はコンテナ内の状態を見て、「インストール」もコンテナ内に導入する（systemd が無いコンテナではサービスは「停止中」表示になるとともに、いつでもインストールできる）
 - **LXD / Docker コンテナ連携**（コンテナ内のファイル操作・ターミナル）
 - **GitHub 連携**（ユーザー名・トークンの保存、リポジトリのクローン登録、status / fetch / pull / ログ表示）
-- opencode サーバーはバックエンドが自動起動し、`/opencode/*` でプロキシ（認証情報はブラウザに触れない）
 - **Tailscale serve** で Tailnet 内のみに HTTPS 公開が可能（LAN 非公開）
 
 ![ロゴ画像](image-ph2.png)
@@ -94,17 +91,15 @@ PORT=3339 npm start
 | `ROOT` | `/` | 編集対象ディレクトリ（例: `ROOT=/home/user/myproject`） |
 | `SELFCODE_USERNAME` / `SELFCODE_PASSWORD` | なし | 設定すると selfcode 自体に Basic 認証を付与 |
 | `SELFCODE_TERM_USER` | 自動検出 | ホスト側ターミナルの既定ユーザー（例: `user`。未指定なら uid 1000 以上の実ユーザーを検出） |
-| `SELFCODE_CONFIG_DIR` | `/opt/lxd-data/selfcode-config` | selfcode が自分で管理するデータ（メモ・ターミナル状態・チャット状態・SSH状態・GitHub設定・テンプレート）の保存先ディレクトリ。`/opt/lxd-data/note` は別アプリからも見えるため v.3.0.0 から専用ディレクトリに分離。起動時に旧場所 `/opt/lxd-data/note/selfcode` のファイルを自動移行する（`SELFCODE_LEGACY_CONFIG_DIR` で旧場所を変更可） |
+| `SELFCODE_CONFIG_DIR` | `/opt/lxd-data/selfcode-config` | selfcode が自分で管理するデータ（メモ・ターミナル状態・SSH状態・GitHub設定・テンプレート）の保存先ディレクトリ。`/opt/lxd-data/note` は別アプリからも見えるため v.3.0.0 から専用ディレクトリに分離。起動時に旧場所 `/opt/lxd-data/note/selfcode` のファイルを自動移行する（`SELFCODE_LEGACY_CONFIG_DIR` で旧場所を変更可） |
 | `SELFCODE_MEMO` | `/opt/lxd-data/selfcode-config/selfcode-memo.md` | メモパネルの保存先 |
 | `SELFCODE_GITHUB_CONFIG` | `/opt/lxd-data/selfcode-config/selfcode-github.json` | GitHub 連携の設定保存先（設定1/設定2 の2プロファイル分のユーザー名・トークン・登録リポジトリ・コミット設定（git config --global の user.name/user.email）と、アクティブな設定番号。設定切替時は保存済みのコミット設定を自動で gitconfig へ再適用。旧形式の単一設定は設定1に引き継ぐ。トークンはブラウザに返さずサーバー側でのみ使用） |
 | `SELFCODE_TERM_STATE` | `/opt/lxd-data/selfcode-config/selfcode-term.json` | ターミナルのペイン構成（分割・cwd・id）の保存先。別のPCから同じ selfcode を開いても同じターミナルプロセスに再接続するために使う |
-| `SELFCODE_CHAT_STATE` | `/opt/lxd-data/selfcode-config/selfcode-chat.json` | チャットで選択中の opencode セッションとワークスペースの保存先 |
 | `SELFCODE_RESTART_CMD` | `systemctl restart selfcode` | 「リスタート」ボタンが実行するコマンド（Ubuntu / CachyOS ともに systemd のため共通） |
 | `SELFCODE_UPDATE_TIMEOUT` | `900000`（15分） | 「アップデート」ボタンの更新処理タイムアウト（ミリ秒） |
 | `SELFCODE_UPDATE_URL` | 本家 `install-selfcode.sh` の raw URL | 「アップデート」ボタンが取得するインストールスクリプトの URL（フォーク運用時のみ上書き） |
 | `SELFCODE_REPO_URL` | `https://github.com/hirogura/selfcode.git` | インストールスクリプトが clone するリポジトリ（フォーク運用時のみ上書き。`SELFCODE_REPO_URL=... sudo -E bash install-selfcode.sh`） |
-| `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD` | `opencode` / 自動生成 | opencode サーバーの認証 |
-| `OPENCODE_BIN` | `opencode` | opencode バイナリのパス |
+| `OPENCODE_BIN` | `opencode` | opencode バイナリのパス（ターミナル起動時の PATH 解決に使用） |
 | `BEACON_DATA_DIR` | `/opt/lxd-data/beacon` | beacon.sh (Agent Beacon) の記憶データ置き場。ターミナルで動く AI CLI にも引き継がれる |
 | `BEACON_BIN` | `beacon` | beacon CLI バイナリのパス（絶対パス指定可） |
 | `BEACON_HARNESSES` | `opencode,claude,codex,cline` | beacon のエンドポイント設定で計測するハーネス（`beacon endpoint install --harness` の引数） |
@@ -144,9 +139,6 @@ sudo tailscale serve --bg --https=3339 http://127.0.0.1:3339
 ## 使い方
 
 - 左の EXPLORER からファイルを開き、`Ctrl+S` で保存
-- 右下の **opencodeチャット**（Ctrl+B）に自然言語で指示 → AI がワークスペース内のファイルを直接変更
-- 変更されたファイルはエディタのタブに自動反映（未保存のタブは上書きしません）
-- opencode が権限を求めたら Allow / Deny で応答
 - 右上の **opencode** ボタン / **freebuff** ボタン / **agy** ボタン（Antigravity CLI）で、**ターミナルを分割**して新しいペインで各 CLI を起動
   - CLI が未インストールの場合は `[Y/n]` で確認（Enter または `y` で自動インストールして起動）
 - 右上の **一時SSH** ボタンで、agy などの OAuth 認証を手元 PC から行えるようにする（トグル）
@@ -154,7 +146,7 @@ sudo tailscale serve --bg --https=3339 http://127.0.0.1:3339
   - openssh-server が未導入の場合は確認を表示し、`y` で pacman（CachyOS/Arch）または apt（Debian系）から自動インストールしてから有効化
   - 手元 PC から `ssh -L <ポート>:localhost:<ポート> root@<IP>` でコンテナへポートを転送し、接続したら `agy` と入力して認証 URL を確認、手元 PC のブラウザで認証（Tailscale 利用時はマジックDNS名 `root@<ホスト名>` でも接続可能。手順は ON 時にターミナルへ案内表示）
   - 認証完了後、もう一度ボタンを押して **OFF** にすると、バックアップした sshd 設定と root パスワードを復元
-- **AI設定** パネルの **通知表示** チェックボックスを ON にすると、ターミナルの AI ツール（opencode / freebuff / cline / agy）が質問・承認確認などで入力待ちになったときや実行が完了したときに**ページ内トースト**でお知らせ（ブラウザ通知が許可されていればブラウザ通知にも表示。チェックを入れると通知の許可を求めます）。チャットパネルは opencode サーバーのイベント配信（busy → idle）を正として、AI が返答を終えた瞬間に「opencode の作業が完了しました」を通知する
+- **AI設定** パネルの **通知表示** チェックボックスを ON にすると、ターミナルの AI ツール（opencode / freebuff / cline / agy）が質問・承認確認などで入力待ちになったときや実行が完了したときに**ページ内トースト**でお知らせ（ブラウザ通知が許可されていればブラウザ通知にも表示。チェックを入れると通知の許可を求めます）
 - **AI設定** パネルの **beacon.sh（記憶層管理）** カードで、AI エージェントの共通記憶層 (beacon.sh / Agent Beacon) を管理
   - **状態更新**： バージョン・beacon-collector サービスの稼働状態・記憶データ置き場を表示
   - **再起動**： beacon-collector サービス（エンドポイントの常駐プロセス）を再起動
@@ -167,7 +159,6 @@ sudo tailscale serve --bg --https=3339 http://127.0.0.1:3339
   - 各ペインの見出しで **ユーザー切替**（root ⇔ 一般ユーザー）・**ゴミ箱**（リセットしてルートへ）・**×**（閉じる）
   - ツールバーの**ゴミ箱**でターミナル全体をリフレッシュ（全分割を解除して初期状態に戻す）
   - ターミナルのペイン構成（分割・cwd・id）はサーバー側にも保存されるため、**別のPCから同じ selfcode を開いても同じターミナルセッションに再接続**できます（code-server と同様に、そのまま作業の続きが見えます）
-- opencode チャットで開いている **セッション・ワークスペースもサーバー側に保存**され、別のPCから開いたときに最後に使っていたセッションを自動的に開きます
 - ツールバーの **コンテナ** ボタンで LXD / Docker の稼働中コンテナを選択
   - エクスプローラがコンテナ内の `/` をルートに切り替わり、ファイルの閲覧・編集・アップロードが可能
   - ターミナルもコンテナ内で開きます（コンテナ内のユーザー・シェルで起動）
@@ -183,8 +174,8 @@ sudo tailscale serve --bg --https=3339 http://127.0.0.1:3339
 ## 構成
 
 ```
-server.js          Node.js バックエンド（静的配信 / ファイルAPI / ターミナルWS / opencodeプロキシ / コンテナ連携）
-public/            フロントエンド（Monaco + xterm.js + チャットUI + ツールバー）
+server.js          Node.js バックエンド（静的配信 / ファイルAPI / ターミナルWS / コンテナ連携）
+public/            フロントエンド（Monaco + xterm.js + メモ・ツールバー）
 install-selfcode.sh インストールスクリプト（GitHub から取得して導入・Tailscale serve 設定）
 selfcode.service   systemd ユニットファイル（HOST=127.0.0.1 で LAN 非公開）
 ```
@@ -217,7 +208,6 @@ rm -rf /opt/lxd-data/beacon    # beacon の記憶データ（退避したい場�
 ## 補足
 
 - opencode のモデル設定・プロバイダ認証はホスト側の `~/.config/opencode/` を使います。
-- opencode サーバーは 127.0.0.1 の一時ポートで起動し、外部には公開しません。
 - beacon.sh (Agent Beacon) の収集データは既定で `/opt/lxd-data/beacon`（`BEACON_DATA_DIR`）にローカル保管されます（ローカルファースト。Beacon Cloud への接続は `beacon login` / `beacon endpoint connect` を明示的に実行した場合に限ります）。
 - 認証情報やデータベースなどの個人情報は `.gitignore` でリポジトリから除外されています。
 
