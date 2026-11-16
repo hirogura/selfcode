@@ -2403,15 +2403,17 @@ const App = (() => {
   async function loadHermesStatus(showToast) {
     const statusEl = $("hermes-status");
     const logEl = $("hermes-log");
+    const logEmptyEl = $("hermes-log-empty");
     try {
       const st = await API.get("/api/hermes/status", undefined, 20000);
       hermesStatusCache = st;
       renderHermesStatus(st);
+      const log = st.install && st.install.log ? st.install.log : "";
       if (logEl) {
-        const log = st.install && st.install.log ? st.install.log : "";
         logEl.textContent = log;
         logEl.hidden = !log;
       }
+      if (logEmptyEl) logEmptyEl.hidden = !!log;
       if (st.install && st.install.running) {
         if (!hermesPollTimer) hermesPollTimer = setInterval(loadHermesStatus, 2000);
       } else if (hermesPollTimer) {
@@ -2783,7 +2785,6 @@ const App = (() => {
       el.type = el.type === "password" ? "text" : "password";
     };
     $("btn-hermes-open").onclick = () => openHermesInTerminal();
-    $("btn-hermes-setup").onclick = () => openHermesInTerminal(["setup"]);
     $("btn-ssh-temp").onclick = toggleSshTemp;
     // 「一時SSH」ボタンの状態を復元
     fetch("/api/ssh-temp", { cache: "no-store" })
