@@ -1275,11 +1275,13 @@ const App = (() => {
   // relPath が指定された場合は作業ディレクトリ(cwd)を設定する。
   // AI設定パネルの「自動承認」が ON のツールは対応するオプションを付けて起動する。
   const AI_SETTINGS_OC_AUTO_KEY = "selfcode.ocAutoApprove";
+  const AI_SETTINGS_KILO_AUTO_KEY = "selfcode.kiloAutoApprove";
   const AI_SETTINGS_FREEBUFF_AUTO_KEY = "selfcode.freebuffAutoApprove";
   const AI_SETTINGS_AGY_AUTO_KEY = "selfcode.agyAutoApprove";
 
   function toolLaunchArgs(cmd) {
     if (cmd === "opencode" && $("ais-oc-auto") && $("ais-oc-auto").checked) return ["--auto"];
+    if (cmd === "kilo" && $("ais-kilo-auto") && $("ais-kilo-auto").checked) return ["--auto"];
     if (cmd === "freebuff" && $("ais-freebuff-auto") && $("ais-freebuff-auto").checked) return ["--trust-agents"];
     if (cmd === "agy" && $("ais-agy-auto") && $("ais-agy-auto").checked) return ["--dangerously-skip-permissions"];
     return undefined;
@@ -2764,6 +2766,7 @@ const App = (() => {
       });
     };
     bindAiSettingCheck("ais-oc-auto", AI_SETTINGS_OC_AUTO_KEY);
+    bindAiSettingCheck("ais-kilo-auto", AI_SETTINGS_KILO_AUTO_KEY);
     bindAiSettingCheck("ais-freebuff-auto", AI_SETTINGS_FREEBUFF_AUTO_KEY);
     bindAiSettingCheck("ais-agy-auto", AI_SETTINGS_AGY_AUTO_KEY);
     // 通知表示チェックボックス: ON にしたときに通知の許可を求める
