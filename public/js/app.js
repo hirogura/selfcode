@@ -13,7 +13,6 @@ const App = (() => {
     terminalWorkspace: $("terminal-workspace"),
     memoPanel: $("memo-panel"),
     github: $("github"),
-    aibridge: $("aibridge"),
     memo: $("memo"),
     memoInput: $("memo-input"),
   };
@@ -113,17 +112,7 @@ const App = (() => {
     revealInExplorer: (p) => revealInExplorer(p || ""),
     // GitHub パネルの Term ボタン用: ターミナルで開き、エクスプローラもそのフォルダへ移動する
     openFolderAt: (p) => openFolderAt(p || ""),
-    // AI連携 (cline=PM × opencode=実装) 用のターミナル操作 API
-    termPanes: () => listBridgePanes(),
-    termActive: () => activeBridgePane(),
-    termEnsureBridge: (cwd, opts) => ensureBridgePanes(cwd, opts),
-    termSend: (id, text) => sendInputToPane(id, text),
-    termExecIn: (id, cmd, args) => execInPane(id, cmd, args),
-    termLog: (id, n) => paneLogTail(id, n),
-    termClearRoles: () => clearBridgeRoles(),
-    onTermData: (fn) => addTermDataListener(fn),
-    onTermExit: (fn) => addTermExitListener(fn),
-    // aibridge.js などからも使える共通通知 API（トースト＋OS通知＋タイトル点滅＋着信音）
+    // 共通通知 API（トースト＋OS通知＋タイトル点滅＋着信音）
     notify: (title, body) => browserNotify(title, body),
   };
 
@@ -641,10 +630,6 @@ const App = (() => {
 
   // ---- Terminal panes (分割対応) ----
   const termState = { root: null, focused: null, panes: new Map() };
-  // AI連携用: ターミナル出力のリスナー（許可検知・完了検知に使う）
-  const termDataListeners = new Set();
-  // AI連携用: プロセス終了のリスナー（非対話ランの完了検知に使う）
-  const termExitListeners = new Set();
   const TERM_LOG_MAX = 200000;
   const TERM_PLAIN_LOG_MAX = 65536;
   function appendPaneLog(pane, data) {
@@ -656,9 +641,6 @@ const App = (() => {
     pane.plainLog = ((pane.plainLog || "") + stripAnsi(data)).slice(-TERM_PLAIN_LOG_MAX);
     pane.lastDataAt = Date.now();
     pane.waitNotified = false; // 新しい出力が来たら入力待ち通知をリセット
-    for (const fn of Array.from(termDataListeners)) {
-      try { fn(pane, data); } catch {}
-    }
   }
 
   // ペインごとに安定した id を発行する（crypto.randomUUID は非セキュアコンテキストで使えないためフォールバック付き）
@@ -675,9 +657,8 @@ const App = (() => {
 
   function titleOf(pane) {
     const dir = displayDir(pane.cwd);
-    const roleTag = pane.role === "cline" ? "🤖PM " : pane.role === "opencode" ? "⚡DEV " : "";
-    if (containerInfo) return roleTag + "📦" + containerInfo.name + " — " + dir;
-    return roleTag + (pane.user ? pane.user + "@" : "") + "bash — " + dir;
+    if (containerInfo) return "📦" + containerInfo.name + " — " + dir;
+    return (pane.user ? pane.user + "@" : "") + "bash — " + dir;
   }
 
   function setPaneTitle(pane) {
@@ -704,8 +685,6 @@ const App = (() => {
       el: null,
       host: null,
       titleEl: null,
-      // AI連携用: 役割 ("cline" | "opencode" | null) と出力ログ
-      role: null,
       log: "",
       plainLog: "",
     };
@@ -901,7 +880,6 @@ const App = (() => {
           pane.running = false;
           pane.runningCmd = "";
           updateFreebuffBtn();
-          notifyTermExit(pane, msg.code);
           notifyPaneExit(pane, exitCmd, msg.code);
         } else if (msg.type === "started") {
           pane.running = true;
@@ -1113,7 +1091,7 @@ const App = (() => {
   function serializeTermState() {
     const ser = (node) => {
       if (!node) return null;
-      if (node.kind === "pane") return { k: "p", id: node.pane.id, cwd: node.pane.cwd, user: node.pane.user, role: node.pane.role || undefined };
+      if (node.kind === "pane") return { k: "p", id: node.pane.id, cwd: node.pane.cwd, user: node.pane.user };
       return { k: node.kind === "row" ? "r" : "c", ch: node.children.map(ser) };
     };
     return { root: ser(termState.root), focused: termState.focused ? termState.focused.id : null };
@@ -1162,7 +1140,6 @@ const App = (() => {
     const build = (d, parent) => {
       if (d.k === "p") {
         const pane = createPane(d.cwd || "", d.id, d.user);
-        if (d.role === "cline" || d.role === "opencode") pane.role = d.role;
         const node = paneNode(pane);
         pane.node = node;
         node.parent = parent;
@@ -1765,39 +1742,6 @@ const App = (() => {
     openToolAt("kilo", relPath);
   }
 
-  // ---- AI連携用ブリッジ API ----
-  function listBridgePanes() {
-    return Array.from(termState.panes.values())
-      .filter((p) => !p.closed)
-      .map((p) => ({ id: p.id, cwd: p.cwd, role: p.role || null, running: !!p.running, runningCmd: p.runningCmd || "" }));
-  }
-
-  // 現在フォーカス中のターミナルペイン（cwd はホスト時はワークスペース相対、
-  // コンテナ選択時はコンテナ内相対パス）。AI連携モーダルの作業ディレクトリ初期値に使う。
-  function activeBridgePane() {
-    const p = activePane();
-    if (!p || p.closed) return null;
-    return { id: p.id, cwd: p.cwd || "", role: p.role || null };
-  }
-
-  function addTermDataListener(fn) {
-    if (typeof fn !== "function") return () => {};
-    termDataListeners.add(fn);
-    return () => termDataListeners.delete(fn);
-  }
-
-  function addTermExitListener(fn) {
-    if (typeof fn !== "function") return () => {};
-    termExitListeners.add(fn);
-    return () => termExitListeners.delete(fn);
-  }
-
-  function notifyTermExit(pane, code) {
-    for (const fn of Array.from(termExitListeners)) {
-      try { fn(pane, code); } catch {}
-    }
-  }
-
   // ---- 通知表示（AI設定パネルの「通知表示」チェックボックス） ----
   // ON のとき、AI ツール実行中に質問・承認確認など入力待ちが発生した場合や、
   // 実行が完了（プロセス終了）した場合にブラウザの通知機能で知らせる。
@@ -1806,7 +1750,7 @@ const App = (() => {
   const NOTIFY_IDLE_MS = 5000;
   // 終了（タスク完了）通知の対象 CLI
   const NOTIFY_AI_CMDS = new Set(["freebuff", "cline", "opencode", "agy", "kilo"]);
-  // 入力待ちっぽい出力かのざっくり判定（aibridge.js の ASK/HUMAN パターンと同じ考え方）
+  // 入力待ちっぽい出力かのざっくり判定
   const NOTIFY_WAIT_RE = /\[y\/n\]|\(y\/n\)|\[Y\/n\]|\(yes\/no\)|yes\/no|press (enter|any key)|press \[|choose (one|an option)|select (one|an option)|continue\?|proceed\?|are you sure|do you want|shall I|may I|waiting for|awaiting|needs your|require(s)? (your )?(input|approval|permission|confirmation)|permission|approval|confirm|login|sign[\s_\-]*in|承認|許可|確認が必要|続行しますか|実行しますか|よろしいですか|入力してください|選択してください|答えてください|教えてください|\?\s*$|？\s*$/i;
 
   function notifyEnabled() {
@@ -2121,10 +2065,6 @@ const App = (() => {
       } else if (state.mode === "github") {
         const w = clamp(state.startW + (state.startX - e.clientX), 280, layout.clientWidth * 0.6);
         els.github.style.width = w + "px";
-      } else if (state.mode === "aibridge") {
-        const w = clamp(state.startW + (state.startX - e.clientX), 280, layout.clientWidth * 0.6);
-        const panel = $("aibridge");
-        if (panel) panel.style.width = w + "px";
       } else if (state.mode === "aisettings") {
         const w = clamp(state.startW + (state.startX - e.clientX), 240, layout.clientWidth * 0.6);
         const panel = $("aisettings");
@@ -2160,7 +2100,6 @@ const App = (() => {
     $("divider-sidebar").addEventListener("pointerdown", (e) => begin(e, "sidebar", els.sidebar));
     $("divider-hermes").addEventListener("pointerdown", (e) => begin(e, "hermes", $("hermes")));
     $("divider-github").addEventListener("pointerdown", (e) => begin(e, "github", els.github));
-    $("divider-aibridge").addEventListener("pointerdown", (e) => begin(e, "aibridge", $("aibridge")));
     $("divider-aisettings").addEventListener("pointerdown", (e) => begin(e, "aisettings", $("aisettings")));
     $("divider-memo-panel").addEventListener("pointerdown", (e) => begin(e, "memo-panel", els.memoPanel));
     $("divider-terminal").addEventListener("pointerdown", (e) => begin(e, "terminal", els.terminal));
@@ -2766,11 +2705,6 @@ const App = (() => {
     $("btn-kilo").onclick = openKiloTerminal;
     $("btn-ag").onclick = openAgTerminal;
     $("btn-hermes").onclick = toggleHermesPanel;
-    $("btn-aibridge").onclick = () => {
-      if (window.AIBridge && typeof window.AIBridge.toggle === "function") window.AIBridge.toggle();
-      else if (window.AIBridge && typeof window.AIBridge.open === "function") window.AIBridge.open();
-      else toast("AI連携モジュールが読み込まれていません", true);
-    };
     $("btn-root").onclick = toggleRootMode;
     $("btn-aisettings").onclick = toggleAiSettings;
     $("btn-aisettings-close").onclick = hideAiSettings;
@@ -2803,7 +2737,7 @@ const App = (() => {
     if (beaconBtns.reinstall) beaconBtns.reinstall.onclick = reinstallBeacon;
     if (beaconBtns.stop) beaconBtns.stop.onclick = stopBeacon;
     loadBeaconStatus();
-    // 「説明を表示/折りたたむ」ボタン（デフォルト折りたたみ、AI連携パネルの aibridge-hint-toggle と同じ動作）
+    // 「説明を表示/折りたたむ」ボタン（デフォルト折りたたみ）
     const bindHintToggle = (btnId, boxId) => {
       const btn = $(btnId), box = $(boxId);
       if (!btn || !box) return;
