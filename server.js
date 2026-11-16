@@ -205,7 +205,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "3.4.0",
+    version: "3.5.0",
     bootId: BOOT_ID,
     workspace: ROOT,
     distro: DISTRO,
@@ -632,6 +632,230 @@ app.post("/api/beacon/install", (req, res) => {
   }
   startBeaconInstall();
   res.json({ ok: true });
+});
+
+// ================= Hermes Agent =================
+// Hermes Agent（CLI）とヘッドレスブラウザ環境の導入・設定。Gemini APIキーはサーバー側に保存し、
+// /api/hermes/status では hasKey のみ返す（平文は返さない）。
+const HERMES_CONFIG = process.env.SELFCODE_HERMES_CONFIG || SELFCODE_CONFIG_DIR + "/selfcode-hermes.json";
+let hermesConfigCache = null;
+const hermesInstall = { running: false, startedAt: null, finishedAt: null, ok: null, log: [], child: null, target: null };
+const HERMES_INSTALL_LOG_MAX = 200;
+
+async function loadHermesConfig() {
+  if (hermesConfigCache) return hermesConfigCache;
+  hermesConfigCache = await readStateFile(HERMES_CONFIG, { geminiApiKey: "" });
+  if (!hermesConfigCache || typeof hermesConfigCache !== "object") hermesConfigCache = { geminiApiKey: "" };
+  if (typeof hermesConfigCache.geminiApiKey !== "string") hermesConfigCache.geminiApiKey = "";
+  return hermesConfigCache;
+}
+
+async function saveHermesConfig() {
+  await writeStateFile(HERMES_CONFIG, hermesConfigCache || { geminiApiKey: "" });
+}
+
+function hermesLogPush(chunk) {
+  for (const line of String(chunk || "").split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    hermesInstall.log.push(line.slice(0, 500));
+  }
+  if (hermesInstall.log.length > HERMES_INSTALL_LOG_MAX) {
+    hermesInstall.log.splice(0, hermesInstall.log.length - HERMES_INSTALL_LOG_MAX);
+  }
+}
+
+function finishHermesInstall(ok) {
+  hermesInstall.running = false;
+  hermesInstall.ok = ok;
+  hermesInstall.finishedAt = Date.now();
+  hermesInstall.child = null;
+  console.log(`[selfcode] hermes install ${ok ? "finished" : "failed"}`);
+}
+
+function hermesInstallScriptBody() {
+  // ユーザー提供の方針に沿った導入: 依存パッケージ → Hermes 導入 → Xvfb+Chromium 起動スクリプト → CDP設定
+  return [
+    "set -e",
+    "export PATH=\"$HOME/.local/bin:$PATH\"",
+    "echo '[selfcode] Hermes Agent のインストールを開始します…'",
+    "if command -v apt-get >/dev/null 2>&1; then",
+    "  (sudo -n apt-get update || apt-get update || true)",
+    "  (sudo -n apt-get install -y chromium-browser xvfb libnss3 libatk1.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 curl git || apt-get install -y chromium-browser xvfb libnss3 libatk1.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 curl git || sudo -n apt-get install -y chromium xvfb libnss3 libatk1.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 curl git || apt-get install -y chromium xvfb libnss3 libatk1.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 curl git || true)",
+    "elif command -v pacman >/dev/null 2>&1; then",
+    "  (sudo -n pacman -Sy --noconfirm chromium xorg-server-xvfb nss atk cups libdrm libxkbcommon libxcomposite libxdamage libxrandr mesa pango cairo curl git || pacman -Sy --noconfirm chromium xorg-server-xvfb nss atk cups libdrm libxkbcommon libxcomposite libxdamage libxrandr mesa pango cairo curl git || true)",
+    "elif command -v apk >/dev/null 2>&1; then",
+    "  (apk add --no-cache chromium xvfb nss atk cups-libs libdrm libxkbcommon libxcomposite libxdamage libxrandr mesa-gbm pango cairo curl git bash || true)",
+    "elif command -v dnf >/dev/null 2>&1; then",
+    "  (sudo -n dnf install -y chromium xvfb nss atk cups-libs libdrm libxkbcommon libXcomposite libXdamage libXrandr mesa-libgbm pango cairo curl git || dnf install -y chromium xvfb nss atk cups-libs libdrm libxkbcommon libXcomposite libXdamage libXrandr mesa-libgbm pango cairo curl git || true)",
+    "elif command -v yum >/dev/null 2>&1; then",
+    "  (sudo -n yum install -y chromium xvfb nss atk cups-libs libdrm libxkbcommon libXcomposite libXdamage libXrandr mesa-libgbm pango cairo curl git || yum install -y chromium xvfb nss atk cups-libs libdrm libxkbcommon libXcomposite libXdamage libXrandr mesa-libgbm pango cairo curl git || true)",
+    "fi",
+    "echo '[selfcode] Hermes Agent 本体をセットアップします…'",
+    "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
+    "mkdir -p \"$HOME/.hermes\"",
+    "cat > \"$HOME/.hermes/start-browser.sh\" <<'SH'",
+    "#!/bin/bash",
+    "pkill -f 'Xvfb :99' >/dev/null 2>&1 || true",
+    "pkill -f 'remote-debugging-port=9222' >/dev/null 2>&1 || true",
+    "Xvfb :99 -screen 0 1280x800x24 > /dev/null 2>&1 &",
+    "export DISPLAY=:99",
+    "CHROME_BIN=\"$(command -v chromium-browser || command -v chromium || command -v google-chrome || command -v google-chrome-stable || true)\"",
+    "if [ -z \"$CHROME_BIN\" ]; then echo 'Chromium/Chrome が見つかりません'; exit 1; fi",
+    "\"$CHROME_BIN\" --no-sandbox --disable-dev-shm-usage --remote-debugging-port=9222 --headless=new --user-data-dir=\"$HOME/.hermes/chrome-profile\" about:blank > /dev/null 2>&1 &",
+    "echo 'browser started (CDP: http://localhost:9222)'",
+    "SH",
+    "chmod +x \"$HOME/.hermes/start-browser.sh\"",
+    "if command -v hermes >/dev/null 2>&1; then",
+    "  hermes config set browser.cdp_url http://localhost:9222 || true",
+    "fi",
+    "echo '[selfcode] Hermes のインストール処理が完了しました'",
+  ].join("\n");
+}
+
+async function applyHermesApiKeyToRuntime() {
+  // 保存済みの Gemini API キーを hermes 設定へ反映（可能な場合）。失敗しても致命的にしない。
+  const cfg = await loadHermesConfig();
+  const key = String(cfg.geminiApiKey || "").trim();
+  if (!key) return;
+  const cmd = "mkdir -p \"$HOME/.hermes\"; export PATH=\"$HOME/.local/bin:$PATH\"; " +
+    "if command -v hermes >/dev/null 2>&1; then hermes config set GOOGLE_API_KEY " + shq(key) + " >/dev/null 2>&1 || true; fi; " +
+    // フォールバック: .env に追記/更新
+    "touch \"$HOME/.hermes/.env\"; tmp=\"$HOME/.hermes/.env.tmp\"; " +
+    "grep -v '^GOOGLE_API_KEY=' \"$HOME/.hermes/.env\" > \"$tmp\" 2>/dev/null || true; " +
+    "echo 'GOOGLE_API_KEY=" + shq(key).slice(1, -1).replace(/'/g, "'\\''") + "' >> \"$tmp\"; mv \"$tmp\" \"$HOME/.hermes/.env\"";
+  try {
+    if (containerCtx) await runContainer(["sh", "-c", cmd], { timeoutMs: 30000 });
+    else await runCmd("bash", ["-c", cmd], 30000);
+  } catch {}
+}
+
+function startHermesInstall() {
+  if (hermesInstall.running) return;
+  hermesInstall.running = true;
+  hermesInstall.startedAt = Date.now();
+  hermesInstall.finishedAt = null;
+  hermesInstall.ok = null;
+  hermesInstall.log = [];
+  hermesInstall.target = containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null;
+  console.log("[selfcode] hermes install started" + (hermesInstall.target ? ` (container: ${hermesInstall.target.name})` : ""));
+  let child;
+  if (hermesInstall.target) {
+    child = spawn(containerBin(hermesInstall.target.runtime), containerExecArgs(hermesInstall.target.runtime, hermesInstall.target.name, false).concat(["bash", "-lc", hermesInstallScriptBody()]), {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } else {
+    child = spawn("bash", ["-lc", hermesInstallScriptBody()], {
+      env: { ...process.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  }
+  hermesInstall.child = child;
+  child.stdout.on("data", (d) => hermesLogPush(d));
+  child.stderr.on("data", (d) => hermesLogPush(d));
+  child.on("error", (e) => {
+    hermesLogPush("[selfcode] インストールの起動に失敗しました: " + e.message);
+    finishHermesInstall(false);
+  });
+  child.on("close", (code) => {
+    if (code === 0) {
+      hermesLogPush("[selfcode] インストールが完了しました。APIキー設定やターミナル起動を行ってください。");
+      finishHermesInstall(true);
+      // インストール後に保存済みキーを反映（ベストエフォート）
+      applyHermesApiKeyToRuntime().catch(() => {});
+    } else {
+      hermesLogPush(`[selfcode] インストールに失敗しました (exit ${code})`);
+      finishHermesInstall(false);
+    }
+  });
+}
+
+async function hermesStatus() {
+  const target = containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null;
+  const cfg = await loadHermesConfig();
+  let installed = false;
+  let binPath = null;
+  let version = null;
+  const probe = async () => {
+    const script = 'export PATH="$HOME/.local/bin:$HOME/.hermes/bin:$PATH"; B="$(command -v hermes 2>/dev/null || true)"; echo "bin:$B"; if [ -n "$B" ]; then "$B" --version 2>/dev/null | head -n 1 || "$B" version 2>/dev/null | head -n 1 || true; fi';
+    if (containerCtx) {
+      const r = await runContainer(["sh", "-lc", script], { timeoutMs: 15000 });
+      return r.stdout.toString("utf8");
+    }
+    const r = await runOut("bash", ["-lc", script], 15000);
+    return (r.out || "") + "\n" + (r.err || "");
+  };
+  try {
+    const out = await probe();
+    const lines = out.split("\n").map((l) => l.trim()).filter(Boolean);
+    for (const l of lines) {
+      if (l.startsWith("bin:")) binPath = l.slice(4) || null;
+      else if (!version && !l.startsWith("bin:")) version = l;
+    }
+    installed = !!binPath;
+  } catch {}
+  if (!installed) {
+    const p = beaconBinPath ? null : null; // no-op
+  }
+  return {
+    installed,
+    binPath,
+    version,
+    hasKey: !!String(cfg.geminiApiKey || "").trim(),
+    target,
+    install: {
+      running: hermesInstall.running,
+      ok: hermesInstall.ok,
+      target: hermesInstall.target,
+      startedAt: hermesInstall.startedAt,
+      finishedAt: hermesInstall.finishedAt,
+      log: hermesInstall.log.slice(-40).join("\n"),
+    },
+  };
+}
+
+app.get("/api/hermes/status", async (req, res, next) => {
+  try {
+    res.json(await hermesStatus());
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.post("/api/hermes/install", (req, res) => {
+  if (hermesInstall.running) {
+    return res.status(409).json({ error: "Hermes のインストールが進行中です" });
+  }
+  startHermesInstall();
+  res.json({ ok: true });
+});
+
+app.put("/api/hermes/settings", async (req, res, next) => {
+  try {
+    const cfg = await loadHermesConfig();
+    const key = req.body && req.body.geminiApiKey !== undefined ? String(req.body.geminiApiKey || "").trim() : cfg.geminiApiKey;
+    if (req.body && Object.prototype.hasOwnProperty.call(req.body, "geminiApiKey")) {
+      // 空文字を送った場合は既存維持せずクリア扱い（明示的クリアは DELETE だが、空保存も許容）
+      cfg.geminiApiKey = String(req.body.geminiApiKey || "").trim();
+      hermesConfigCache = cfg;
+      await saveHermesConfig();
+      if (cfg.geminiApiKey) await applyHermesApiKeyToRuntime();
+    }
+    res.json({ ok: true, hasKey: !!cfg.geminiApiKey });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.delete("/api/hermes/settings", async (req, res, next) => {
+  try {
+    const cfg = await loadHermesConfig();
+    cfg.geminiApiKey = "";
+    hermesConfigCache = cfg;
+    await saveHermesConfig();
+    res.json({ ok: true, hasKey: false });
+  } catch (e) {
+    next(e);
+  }
 });
 
 // ================= 一時SSH（agy などの OAuth 認証を手元 PC から行えるようにする） =================
@@ -2561,6 +2785,12 @@ function findBin(name, pathStr, extraHome) {
     for (const h of homes) candidates.push(path.join(h, ".local/bin/beacon"));
     candidates.push("/usr/local/bin/beacon", "/opt/beacon/bin/beacon", "/usr/bin/beacon");
   }
+  // Hermes Agent CLI。公式インストーラは ~/.local/bin/hermes などに配置する。
+  if (name === "hermes") {
+    const homes = [process.env.HOME || os.homedir(), extraHome].filter(Boolean);
+    for (const h of homes) candidates.push(path.join(h, ".local/bin/hermes"), path.join(h, ".hermes/bin/hermes"));
+    candidates.push("/usr/local/bin/hermes", "/usr/bin/hermes");
+  }
   for (const c of candidates) {
     try {
       fs.accessSync(c, fs.constants.X_OK);
@@ -2617,6 +2847,39 @@ const INSTALL_CMDS = {
     "B=\"$(command -v beacon || echo beacon)\"",
     "$B version",
     BEACON_ENDPOINT_STEP,
+  ].join("; "),
+  // Hermes Agent + ヘッドレスブラウザ環境（ユーザー指示に基づく簡易導入）
+  hermes: [
+    "set -e",
+    "export PATH=\"$HOME/.local/bin:$PATH\"",
+    "echo '[selfcode] Hermes Agent のインストールを開始します…'",
+    "if command -v apt-get >/dev/null 2>&1; then",
+    "  (sudo -n apt-get update || apt-get update || true); (sudo -n apt-get install -y chromium-browser xvfb libnss3 libatk1.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 curl git || apt-get install -y chromium-browser xvfb libnss3 libatk1.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 curl git || sudo -n apt-get install -y chromium xvfb libnss3 libatk1.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 curl git || apt-get install -y chromium xvfb libnss3 libatk1.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 curl git || true)",
+    "elif command -v pacman >/dev/null 2>&1; then",
+    "  (sudo -n pacman -Sy --noconfirm chromium xorg-server-xvfb nss atk cups libdrm libxkbcommon libxcomposite libxdamage libxrandr mesa pango cairo curl git || pacman -Sy --noconfirm chromium xorg-server-xvfb nss atk cups libdrm libxkbcommon libxcomposite libxdamage libxrandr mesa pango cairo curl git || true)",
+    "elif command -v apk >/dev/null 2>&1; then",
+    "  (apk add --no-cache chromium xvfb nss atk cups-libs libdrm libxkbcommon libxcomposite libxdamage libxrandr mesa-gbm pango cairo curl git bash || true)",
+    "elif command -v dnf >/dev/null 2>&1; then",
+    "  (sudo -n dnf install -y chromium xvfb nss atk cups-libs libdrm libxkbcommon libXcomposite libXdamage libXrandr mesa-libgbm pango cairo curl git || dnf install -y chromium xvfb nss atk cups-libs libdrm libxkbcommon libXcomposite libXdamage libXrandr mesa-libgbm pango cairo curl git || true)",
+    "elif command -v yum >/dev/null 2>&1; then",
+    "  (sudo -n yum install -y chromium xvfb nss atk cups-libs libdrm libxkbcommon libXcomposite libXdamage libXrandr mesa-libgbm pango cairo curl git || yum install -y chromium xvfb nss atk cups-libs libdrm libxkbcommon libXcomposite libXdamage libXrandr mesa-libgbm pango cairo curl git || true)",
+    "fi",
+    "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
+    "mkdir -p \"$HOME/.hermes\"",
+    "cat > \"$HOME/.hermes/start-browser.sh\" <<'SH'",
+    "#!/bin/bash",
+    "pkill -f 'Xvfb :99' >/dev/null 2>&1 || true",
+    "pkill -f 'remote-debugging-port=9222' >/dev/null 2>&1 || true",
+    "Xvfb :99 -screen 0 1280x800x24 > /dev/null 2>&1 &",
+    "export DISPLAY=:99",
+    "CHROME_BIN=\"$(command -v chromium-browser || command -v chromium || command -v google-chrome || command -v google-chrome-stable || true)\"",
+    "if [ -z \"$CHROME_BIN\" ]; then echo 'Chromium/Chrome が見つかりません'; exit 1; fi",
+    "\"$CHROME_BIN\" --no-sandbox --disable-dev-shm-usage --remote-debugging-port=9222 --headless=new --user-data-dir=\"$HOME/.hermes/chrome-profile\" about:blank > /dev/null 2>&1 &",
+    "echo 'browser started (CDP: http://localhost:9222)'",
+    "SH",
+    "chmod +x \"$HOME/.hermes/start-browser.sh\"",
+    "if command -v hermes >/dev/null 2>&1; then hermes config set browser.cdp_url http://localhost:9222 || true; fi",
+    "echo '[selfcode] Hermes の導入処理が完了しました。APIキーは selfcode の Hermes パネルで設定できます。'",
   ].join("; "),
 };
 
@@ -3181,6 +3444,7 @@ const SELF_MANAGED_CONFIG_FILES = [
   "selfcode-term.json",
   "selfcode-github.json",
   "selfcode-templates.json",
+  "selfcode-hermes.json",
 ];
 
 async function migrateLegacyConfigFiles() {

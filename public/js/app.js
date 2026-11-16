@@ -2158,6 +2158,7 @@ const App = (() => {
     };
     // pointer イベントを使うことでマウスとタッチ（iPad など）の両方でドラッグできる
     $("divider-sidebar").addEventListener("pointerdown", (e) => begin(e, "sidebar", els.sidebar));
+    $("divider-hermes").addEventListener("pointerdown", (e) => begin(e, "hermes", $("hermes")));
     $("divider-github").addEventListener("pointerdown", (e) => begin(e, "github", els.github));
     $("divider-aibridge").addEventListener("pointerdown", (e) => begin(e, "aibridge", $("aibridge")));
     $("divider-aisettings").addEventListener("pointerdown", (e) => begin(e, "aisettings", $("aisettings")));
@@ -2371,6 +2372,133 @@ const App = (() => {
       toast(e.message, true);
       // 失敗時は未保存状態のまま数秒後に自動リトライする
       if (memoDirty) markMemoDirty();
+    }
+  }
+
+  // ---- Hermes Agent パネル ----
+  const HERMES_PANEL_KEY = "selfcode.hermesVisible";
+  let hermesStatusCache = null;
+  let hermesPollTimer = null;
+
+  function hermesVisible() {
+    return !$("hermes").classList.contains("hidden");
+  }
+  function showHermesPanel() {
+    $("hermes").classList.remove("hidden");
+    $("divider-hermes").classList.remove("hidden");
+    $("btn-hermes").classList.add("active");
+    try { localStorage.setItem(HERMES_PANEL_KEY, "1"); } catch {}
+    loadHermesStatus();
+  }
+  function hideHermesPanel() {
+    $("hermes").classList.add("hidden");
+    $("divider-hermes").classList.add("hidden");
+    $("btn-hermes").classList.remove("active");
+    try { localStorage.setItem(HERMES_PANEL_KEY, "0"); } catch {}
+  }
+  function toggleHermesPanel() {
+    hermesVisible() ? hideHermesPanel() : showHermesPanel();
+  }
+
+  async function loadHermesStatus(showToast) {
+    const statusEl = $("hermes-status");
+    const logEl = $("hermes-log");
+    try {
+      const st = await API.get("/api/hermes/status", undefined, 20000);
+      hermesStatusCache = st;
+      renderHermesStatus(st);
+      if (logEl) {
+        const log = st.install && st.install.log ? st.install.log : "";
+        logEl.textContent = log;
+        logEl.hidden = !log;
+      }
+      if (st.install && st.install.running) {
+        if (!hermesPollTimer) hermesPollTimer = setInterval(loadHermesStatus, 2000);
+      } else if (hermesPollTimer) {
+        clearInterval(hermesPollTimer);
+        hermesPollTimer = null;
+      }
+      if (showToast) toast("Hermes の状態を更新しました");
+    } catch (e) {
+      if (statusEl) statusEl.textContent = "状態を取得できませんでした: " + e.message;
+    }
+  }
+
+  function renderHermesStatus(st) {
+    const statusEl = $("hermes-status");
+    const installBtn = $("btn-hermes-install");
+    if (!statusEl) return;
+    const bits = [];
+    if (st.target) bits.push(`対象: コンテナ ${st.target.name} (${st.target.runtime})`);
+    else bits.push("対象: ホスト");
+    if (st.installed) {
+      bits.push("導入状態: インストール済み");
+      if (st.version) bits.push("バージョン: " + st.version);
+      if (st.binPath) bits.push("CLI: " + st.binPath);
+    } else {
+      bits.push("導入状態: 未インストール");
+    }
+    bits.push(st.hasKey ? "Gemini APIキー: 設定済み" : "Gemini APIキー: 未設定");
+    if (st.install && st.install.running) bits.push("インストール: 実行中…");
+    else if (st.install && st.install.ok === true) bits.push("インストール: 完了");
+    else if (st.install && st.install.ok === false) bits.push("インストール: 失敗");
+    statusEl.textContent = bits.join("\n");
+    if (installBtn) installBtn.disabled = !!(st.install && st.install.running);
+    // キー入力欄のプレースホルダ的表示はしない（未入力のまま維持で既存キー保持）
+    const keyStatus = $("hermes-key-status");
+    if (keyStatus) keyStatus.textContent = st.hasKey ? "保存済みのAPIキーがあります（変更する場合のみ入力して保存）" : "APIキーは未設定です";
+  }
+
+  async function installHermes() {
+    try {
+      await API.post("/api/hermes/install", {});
+      toast("Hermes のインストールを開始しました");
+      loadHermesStatus();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
+
+  async function saveHermesKey() {
+    const input = $("hermes-gemini-key");
+    const key = input ? input.value.trim() : "";
+    try {
+      const res = await API.put("/api/hermes/settings", { geminiApiKey: key });
+      if (input) input.value = "";
+      toast(res && res.hasKey ? "Gemini APIキーを保存しました" : "Gemini APIキーをクリアしました");
+      loadHermesStatus();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
+
+  async function clearHermesKey() {
+    try {
+      await API.del("/api/hermes/settings");
+      const input = $("hermes-gemini-key");
+      if (input) input.value = "";
+      toast("Gemini APIキーをクリアしました");
+      loadHermesStatus();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
+
+  function openHermesInTerminal(args) {
+    const wasHidden = els.terminal.classList.contains("hidden");
+    showTerminalPanel();
+    const pane = activePane();
+    if (!pane) return;
+    let targetPane = pane;
+    if (wasHidden) {
+      targetPane = firstPaneIn(termState.root) || pane;
+      focusPane(targetPane);
+    } else {
+      splitPane(pane);
+      targetPane = activePane() || pane;
+    }
+    if (targetPane && !targetPane.running) {
+      execPane(targetPane, "hermes", Array.isArray(args) && args.length ? args : undefined);
     }
   }
 
@@ -2635,6 +2763,7 @@ const App = (() => {
     $("btn-opencode").onclick = openOpencodeTerminal;
     $("btn-kilo").onclick = openKiloTerminal;
     $("btn-ag").onclick = openAgTerminal;
+    $("btn-hermes").onclick = toggleHermesPanel;
     $("btn-aibridge").onclick = () => {
       if (window.AIBridge && typeof window.AIBridge.toggle === "function") window.AIBridge.toggle();
       else if (window.AIBridge && typeof window.AIBridge.open === "function") window.AIBridge.open();
@@ -2643,6 +2772,18 @@ const App = (() => {
     $("btn-root").onclick = toggleRootMode;
     $("btn-aisettings").onclick = toggleAiSettings;
     $("btn-aisettings-close").onclick = hideAiSettings;
+    $("btn-hermes-close").onclick = hideHermesPanel;
+    $("btn-hermes-install").onclick = installHermes;
+    $("btn-hermes-refresh").onclick = () => loadHermesStatus(true);
+    $("hermes-key-save").onclick = saveHermesKey;
+    $("hermes-key-clear").onclick = clearHermesKey;
+    $("hermes-key-toggle").onclick = () => {
+      const el = $("hermes-gemini-key");
+      if (!el) return;
+      el.type = el.type === "password" ? "text" : "password";
+    };
+    $("btn-hermes-open").onclick = () => openHermesInTerminal();
+    $("btn-hermes-setup").onclick = () => openHermesInTerminal(["setup"]);
     $("btn-ssh-temp").onclick = toggleSshTemp;
     // 「一時SSH」ボタンの状態を復元
     fetch("/api/ssh-temp", { cache: "no-store" })
@@ -2677,6 +2818,7 @@ const App = (() => {
     bindHintToggle("ais-notify-hint-toggle", "ais-notify-hint");
     // AI設定パネルの表示状態を復元
     try { if (localStorage.getItem(AI_SETTINGS_KEY) === "1") showAiSettings(); } catch {}
+    try { if (localStorage.getItem(HERMES_PANEL_KEY) === "1") showHermesPanel(); } catch {}
     // AI設定パネルの「自動承認」チェックボックス（状態の復元と保存）
     const bindAiSettingCheck = (id, key) => {
       const el = $(id);

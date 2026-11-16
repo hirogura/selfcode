@@ -897,3 +897,26 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
   max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px;
 }
 .aibridge-log-line { white-space: pre-wrap; word-break: break-word; }
+
+/* Hermes パネル */
+.hermes {
+  width: 340px; min-width: 220px; max-width: 640px;
+  flex: 0 0 auto;
+  background: var(--bg-2); border-left: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.hermes.hidden { display: none; }
+.hermes-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 10px; height: var(--bar-h);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px; letter-spacing: .08em; color: var(--fg-dim);
+}
+.hermes-head .hint { font-size: 11px; letter-spacing: 0; color: var(--fg-dim); opacity: .8; }
+.hermes-head-actions { display: flex; gap: 4px; }
+.hermes-body {
+  flex: 1; overflow-y: auto; padding: 8px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+#hermes-status { white-space: pre-wrap; }
+#hermes-log { max-height: 180px; }
