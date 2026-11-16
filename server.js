@@ -205,7 +205,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "3.3.0",
+    version: "3.4.0",
     bootId: BOOT_ID,
     workspace: ROOT,
     distro: DISTRO,
@@ -2548,6 +2548,12 @@ function findBin(name, pathStr, extraHome) {
     for (const h of homes) candidates.push(path.join(h, ".local/bin/agy"));
     candidates.push("/usr/local/bin/agy", "/usr/bin/agy");
   }
+  // kilo は ~/.kilo/bin または ~/.local/bin にインストールされることがある
+  if (name === "kilo") {
+    const homes = [process.env.HOME || os.homedir(), extraHome].filter(Boolean);
+    for (const h of homes) candidates.push(path.join(h, ".kilo/bin/kilo"), path.join(h, ".local/bin/kilo"));
+    candidates.push("/usr/local/bin/kilo", "/usr/bin/kilo");
+  }
   // beacon.sh (Agent Beacon) の CLI。deb/rpm 経由では /usr/local/bin に、
   // tarball 経由では ~/.local/bin または /opt/beacon/bin に置かれる。
   if (name === "beacon") {
@@ -2600,6 +2606,8 @@ const INSTALL_CMDS = {
       'if [ "$(id -u)" = "0" ]; then npm install -g cline; else sudo npm install -g cline; fi',
   agy:
     'export PATH="$HOME/.local/bin:$PATH"; curl -fsSL https://antigravity.google/cli/install.sh | bash; if [ "$(id -u)" = "0" ] && [ -f /root/.local/bin/agy ]; then cp -f /root/.local/bin/agy /usr/local/bin/agy 2>/dev/null && chmod 755 /usr/local/bin/agy 2>/dev/null || true; fi',
+  kilo:
+    'export PATH="$HOME/.kilo/bin:$HOME/.local/bin:$PATH"; curl -fsSL https://kilo.ai/cli/install | bash; if [ "$(id -u)" = "0" ] && [ -f /root/.kilo/bin/kilo ]; then cp -f /root/.kilo/bin/kilo /usr/local/bin/kilo 2>/dev/null && chmod 755 /usr/local/bin/kilo 2>/dev/null || true; fi; if command -v kilo >/dev/null 2>&1; then echo "[selfcode] kilo auth login を実行します…"; kilo auth login; fi',
   // beacon.sh (Agent Beacon) は公式リリースの install.sh から導入する（systemd 環境では
   // .deb/.rpm が beacon-collector サービスまで構成する）。非対応ディストロでは tarball で導入。
   // BEACON_TARBALL_STEPS / BEACON_ENDPOINT_STEP（beacon.sh 管理セクションで定義）を使い回す。
@@ -2988,9 +2996,9 @@ wss.on("connection", (ws, req) => {
       // 保存済みの cwd がコンテナ内に無い場合でもシェルは起動するように cd 失敗は無視する
       // procArgs もシェルエスケープして埋め込む（インストール確認スクリプトの起動用）
       const argStr = procArgs && procArgs.length ? " " + procArgs.map(shq).join(" ") : "";
-      // opencode は ~/.opencode/bin、Antigravity CLI (agy) は ~/.local/bin にインストールされるため、
+      // opencode は ~/.opencode/bin、Antigravity CLI (agy) は ~/.local/bin、kilo は ~/.kilo/bin にインストールされるため、
       // コンテナ内の PATH にも追加しておく（インストール判定と実行で同じ PATH にする）
-      const inner = `${dir ? `cd ${shq(dir)} 2>/dev/null || true; ` : ""}export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"; exec ${procCmd}${argStr}`;
+      const inner = `${dir ? `cd ${shq(dir)} 2>/dev/null || true; ` : ""}export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$HOME/.kilo/bin:$PATH"; exec ${procCmd}${argStr}`;
       bin = containerBin(containerCtx.runtime);
       args = [...containerExecArgs(containerCtx.runtime, containerCtx.name, true), "sh", "-c", inner];
       cwd = ROOT;
@@ -3020,17 +3028,17 @@ wss.on("connection", (ws, req) => {
         cwd = dir;
         const home = userHomeOf(procUser);
         procEnv = { ...procEnv, ...keyringEnv, HOME: home, USER: procUser, LOGNAME: procUser, SHELL: procCmd };
-        // opencode は ~/.opencode/bin、Antigravity CLI などは ~/.local/bin にインストールされる。
+        // opencode は ~/.opencode/bin、Antigravity CLI や kilo などは ~/.local/bin / ~/.kilo/bin にインストールされる。
         // root の PATH（/root/.opencode/bin）は一般ユーザーから辿れないため、実行ユーザーのものを先頭に追加する。
-        procEnv = { ...procEnv, PATH: `${home}/.opencode/bin:${home}/.local/bin:${procEnv.PATH}` };
+        procEnv = { ...procEnv, PATH: `${home}/.opencode/bin:${home}/.local/bin:${home}/.kilo/bin:${procEnv.PATH}` };
       } else {
         bin = procCmd;
         args = procArgs || [];
         cwd = dir;
-        // 同上: 実行ユーザーの ~/.opencode/bin と ~/.local/bin を PATH に追加
-        // （opencode と agy などを、シェルの設定ファイルに依存せず直接起動できるように）
+        // 同上: 実行ユーザーの ~/.opencode/bin / ~/.local/bin / ~/.kilo/bin を PATH に追加
+        // （opencode / agy / kilo などを、シェルの設定ファイルに依存せず直接起動できるように）
         const home = userHomeOf(curUser);
-        procEnv = { ...procEnv, ...keyringEnv, PATH: `${home}/.opencode/bin:${home}/.local/bin:${procEnv.PATH}` };
+        procEnv = { ...procEnv, ...keyringEnv, PATH: `${home}/.opencode/bin:${home}/.local/bin:${home}/.kilo/bin:${procEnv.PATH}` };
       }
     }
     const child = pty.spawn(bin, args, {
@@ -3095,8 +3103,8 @@ wss.on("connection", (ws, req) => {
       if (INSTALL_CMDS[cmd]) {
         let found = false;
         try {
-          // opencode は ~/.opencode/bin、Antigravity CLI (agy) は ~/.local/bin にインストールされるため、インストール判定の PATH にも追加する
-          const { stdout } = await runContainer(["sh", "-c", 'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"; command -v ' + cmd], { timeoutMs: 8000 });
+          // opencode は ~/.opencode/bin、Antigravity CLI (agy) は ~/.local/bin、kilo は ~/.kilo/bin にインストールされるため、インストール判定の PATH にも追加する
+          const { stdout } = await runContainer(["sh", "-c", 'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$HOME/.kilo/bin:$PATH"; command -v ' + cmd], { timeoutMs: 8000 });
           found = stdout.toString("utf8").trim().length > 0;
         } catch {}
         if (!found) {

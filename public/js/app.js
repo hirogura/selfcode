@@ -385,6 +385,7 @@ const App = (() => {
       items.push({ sep: true });
       items.push({ label: "ここで opencode", act: () => openOpencodeAt(target.dir) });
       items.push({ label: "ここで cline", act: () => openClineAt(target.dir) });
+      items.push({ label: "ここで kilo", act: () => openKiloAt(target.dir) });
       items.push({ label: "ここで freebuff", act: () => openFreebuffAt(target.dir) });
       items.push({ label: "ここで agy", act: () => openAgyAt(target.dir) });
       items.push({ label: "パスをコピー", act: () => copyPath(target.path) });
@@ -399,6 +400,7 @@ const App = (() => {
       items.push({ sep: true });
       items.push({ label: "ここで opencode", act: () => openOpencodeAt(target.path) });
       items.push({ label: "ここで cline", act: () => openClineAt(target.path) });
+      items.push({ label: "ここで kilo", act: () => openKiloAt(target.path) });
       items.push({ label: "ここで freebuff", act: () => openFreebuffAt(target.path) });
       items.push({ label: "ここで agy", act: () => openAgyAt(target.path) });
       items.push({ label: "パスをコピー", act: () => copyPath(target.path) });
@@ -907,8 +909,8 @@ const App = (() => {
           pane.lastDataAt = Date.now();
           pane.waitNotified = false;
           updateFreebuffBtn();
-          if (msg.cmd === "freebuff" || msg.cmd === "cline" || msg.cmd === "agy") {
-            const label = msg.cmd === "freebuff" ? "freebuff" : msg.cmd === "cline" ? "cline" : "agy (Antigravity CLI)";
+          if (msg.cmd === "freebuff" || msg.cmd === "cline" || msg.cmd === "kilo" || msg.cmd === "agy") {
+            const label = msg.cmd === "freebuff" ? "freebuff" : msg.cmd === "cline" ? "cline" : msg.cmd === "kilo" ? "kilo" : "agy (Antigravity CLI)";
             pane.term.reset();
             pane.term.write(
               msg.installing
@@ -1286,6 +1288,7 @@ const App = (() => {
     $("btn-freebuff").classList.toggle("active", cmd === "freebuff");
     $("btn-cline").classList.toggle("active", cmd === "cline");
     $("btn-opencode").classList.toggle("active", cmd === "opencode");
+    $("btn-kilo").classList.toggle("active", cmd === "kilo");
     $("btn-ag").classList.toggle("active", cmd === "agy");
   }
 
@@ -1338,6 +1341,10 @@ const App = (() => {
     openToolInTerminal("opencode");
   }
 
+  function openKiloTerminal() {
+    openToolInTerminal("kilo");
+  }
+
   function openAgTerminal() {
     openToolInTerminal("agy");
   }
@@ -1345,7 +1352,7 @@ const App = (() => {
   function toggleRootMode() {
     rootMode = !rootMode;
     $("btn-root").classList.toggle("active", rootMode);
-    toast(rootMode ? "Root モード ON: opencode/cline/freebuff/agy が root で実行されます" : "Root モード OFF");
+    toast(rootMode ? "Root モード ON: opencode/cline/freebuff/kilo/agy が root で実行されます" : "Root モード OFF");
   }
 
   let sshTempOn = false; // 「一時SSH」ボタンの状態（/api/ssh-temp と同期）
@@ -1754,6 +1761,10 @@ const App = (() => {
     openToolAt("agy", relPath);
   }
 
+  function openKiloAt(relPath) {
+    openToolAt("kilo", relPath);
+  }
+
   // ---- AI連携用ブリッジ API ----
   function listBridgePanes() {
     return Array.from(termState.panes.values())
@@ -1794,7 +1805,7 @@ const App = (() => {
   // 出力がこの時間止まったら入力待ちとみなす
   const NOTIFY_IDLE_MS = 5000;
   // 終了（タスク完了）通知の対象 CLI
-  const NOTIFY_AI_CMDS = new Set(["freebuff", "cline", "opencode", "agy"]);
+  const NOTIFY_AI_CMDS = new Set(["freebuff", "cline", "opencode", "agy", "kilo"]);
   // 入力待ちっぽい出力かのざっくり判定（aibridge.js の ASK/HUMAN パターンと同じ考え方）
   const NOTIFY_WAIT_RE = /\[y\/n\]|\(y\/n\)|\[Y\/n\]|\(yes\/no\)|yes\/no|press (enter|any key)|press \[|choose (one|an option)|select (one|an option)|continue\?|proceed\?|are you sure|do you want|shall I|may I|waiting for|awaiting|needs your|require(s)? (your )?(input|approval|permission|confirmation)|permission|approval|confirm|login|sign[\s_\-]*in|承認|許可|確認が必要|続行しますか|実行しますか|よろしいですか|入力してください|選択してください|答えてください|教えてください|\?\s*$|？\s*$/i;
 
@@ -2622,6 +2633,7 @@ const App = (() => {
     $("btn-freebuff").onclick = openFreebuffTerminal;
     $("btn-cline").onclick = openClineTerminal;
     $("btn-opencode").onclick = openOpencodeTerminal;
+    $("btn-kilo").onclick = openKiloTerminal;
     $("btn-ag").onclick = openAgTerminal;
     $("btn-aibridge").onclick = () => {
       if (window.AIBridge && typeof window.AIBridge.toggle === "function") window.AIBridge.toggle();
