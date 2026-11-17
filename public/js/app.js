@@ -2326,6 +2326,7 @@ const App = (() => {
 
   // ---- Hermes Agent パネル ----
   const HERMES_PANEL_KEY = "selfcode.hermesVisible";
+  const HERMES_MODEL_KEY = "selfcode.hermesModel";
   let hermesStatusCache = null;
   let hermesPollTimer = null;
 
@@ -2433,6 +2434,13 @@ const App = (() => {
     } catch (e) {
       toast(e.message, true);
     }
+  }
+
+  function hermesLaunchArgs() {
+    const el = $("hermes-model");
+    const model = el ? el.value.trim() : "";
+    try { localStorage.setItem(HERMES_MODEL_KEY, model); } catch {}
+    return model ? ["--model", model] : undefined;
   }
 
   function openHermesInTerminal(args) {
@@ -2728,7 +2736,7 @@ const App = (() => {
       if (!el) return;
       el.type = el.type === "password" ? "text" : "password";
     };
-    $("btn-hermes-open").onclick = () => openHermesInTerminal();
+    $("btn-hermes-open").onclick = () => openHermesInTerminal(hermesLaunchArgs());
     $("btn-ssh-temp").onclick = toggleSshTemp;
     // 「一時SSH」ボタンの状態を復元
     fetch("/api/ssh-temp", { cache: "no-store" })
@@ -2764,6 +2772,11 @@ const App = (() => {
     // AI設定パネルの表示状態を復元
     try { if (localStorage.getItem(AI_SETTINGS_KEY) === "1") showAiSettings(); } catch {}
     try { if (localStorage.getItem(HERMES_PANEL_KEY) === "1") showHermesPanel(); } catch {}
+    // Hermes の起動時モデルを復元（毎回入力しなくて済むように保存もする）
+    try {
+      const savedHermesModel = localStorage.getItem(HERMES_MODEL_KEY);
+      if (savedHermesModel) $("hermes-model").value = savedHermesModel;
+    } catch {}
     // AI設定パネルの「自動承認」チェックボックス（状態の復元と保存）
     const bindAiSettingCheck = (id, key) => {
       const el = $(id);
