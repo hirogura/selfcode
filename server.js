@@ -205,7 +205,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "3.8.2",
+    version: "3.9.0",
     bootId: BOOT_ID,
     workspace: ROOT,
     distro: DISTRO,
@@ -635,7 +635,7 @@ app.post("/api/beacon/install", (req, res) => {
 });
 
 // ================= Hermes Agent =================
-// Hermes Agent（CLI）とヘッドレスブラウザ環境の導入・設定。Gemini APIキーはサーバー側に保存し、
+// Hermes Agent（CLI）と CDP ブラウザ環境の導入・設定。Gemini APIキーはサーバー側に保存し、
 // /api/hermes/status では hasKey のみ返す（平文は返さない）。
 const HERMES_CONFIG = process.env.SELFCODE_HERMES_CONFIG || SELFCODE_CONFIG_DIR + "/selfcode-hermes.json";
 let hermesConfigCache = null;
@@ -672,8 +672,92 @@ function finishHermesInstall(ok) {
   console.log(`[selfcode] hermes install ${ok ? "finished" : "failed"}`);
 }
 
+// CDP ブラウザ起動スクリプト。headless（Xvfb + 専用ヘッドレス）と desktop（KDE セッションに
+// ウィンドウを出す）の 2 モードを引数で切り替える。既に開いているブラウザに CDP は後付け
+// できないため、いずれも Hermes 専用のユーザーデータディレクトリで別起動する。
+function hermesBrowserScriptBody() {
+  return [
+    "#!/bin/bash",
+    "# 使い方: start-browser.sh [headless|desktop]  (省略時は headless)",
+    "MODE=\"${1:-headless}\"",
+    "export PATH=\"$HOME/.local/bin:$PATH\"",
+    "mkdir -p \"$HOME/.hermes\"",
+    "CHROME_BIN=\"$(command -v cachyos-browser || command -v chromium-browser || command -v chromium || command -v google-chrome || command -v google-chrome-stable || true)\"",
+    "if [ -z \"$CHROME_BIN\" ]; then echo 'Chromium 系ブラウザが見つかりません' >&2; exit 1; fi",
+    "",
+    "wait_cdp() {",
+    "  for i in $(seq 1 20); do",
+    "    if curl -fsS --max-time 1 http://localhost:9222/json/version >/dev/null 2>&1; then",
+    "      echo \"CDP ready: http://localhost:9222\"",
+    "      return 0",
+    "    fi",
+    "    sleep 0.5",
+    "  done",
+    "  echo 'CDP ポートに応答がありません。ブラウザのログ:' >&2",
+    "  if [ -f \"$HOME/.hermes/browser.log\" ]; then tail -n 15 \"$HOME/.hermes/browser.log\" >&2; fi",
+    "  return 1",
+    "}",
+    "",
+    "start_headless() {",
+    "  pkill -f 'remote-debugging-port=9222' >/dev/null 2>&1 || true",
+    "  pkill -f 'Xvfb :99' >/dev/null 2>&1 || true",
+    "  if command -v Xvfb >/dev/null 2>&1; then",
+    "    Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 &",
+    "    export DISPLAY=:99",
+    "  fi",
+    "  \"$CHROME_BIN\" --no-sandbox --disable-dev-shm-usage --remote-debugging-port=9222 --headless=new --user-data-dir=\"$HOME/.hermes/chrome-profile\" about:blank >/dev/null 2>&1 &",
+    "  echo headless > \"$HOME/.hermes/browser-mode\"",
+    "  echo 'browser started (headless)'",
+    "}",
+    "",
+    "start_desktop() {",
+    "  # 9222 が既に使われていたら、ユーザーのブラウザを勝手に終了せず失敗させる",
+    "  if curl -fsS --max-time 2 http://localhost:9222/json/version >/dev/null 2>&1; then",
+    "    echo 'CDP ポート 9222 は既に使用されています。先に「停止」を押してください。' >&2",
+    "    return 1",
+    "  fi",
+    "  # API が検出した KDE セッションの環境（DISPLAY / XAUTHORITY / WAYLAND_DISPLAY など）を読み込む",
+    "  if [ -f \"$HOME/.hermes/desktop-env\" ]; then . \"$HOME/.hermes/desktop-env\"; fi",
+    "  DESKTOP_USER=\"$(cat \"$HOME/.hermes/desktop-user\" 2>/dev/null || true)\"",
+    "  PROFILE_BASE=\"${DESKTOP_HOME:-$HOME}\"",
+    "  if [ -n \"$DESKTOP_USER\" ] && [ \"$(id -u)\" = \"0\" ]; then runuser -u \"$DESKTOP_USER\" -- mkdir -p \"$PROFILE_BASE/.hermes\" 2>/dev/null || true; fi",
+    "  ENV_ARGS=()",
+    "  for k in DISPLAY WAYLAND_DISPLAY XAUTHORITY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS XDG_SESSION_TYPE XDG_DATA_DIRS; do",
+    "    v=\"$(printenv \"$k\" 2>/dev/null || true)\"",
+    "    if [ -n \"$v\" ]; then ENV_ARGS+=(\"$k=$v\"); fi",
+    "  done",
+    "  if [ -n \"$DESKTOP_USER\" ] && [ \"$(id -u)\" = \"0\" ] && command -v runuser >/dev/null 2>&1; then",
+    "    runuser -u \"$DESKTOP_USER\" -- env \"${ENV_ARGS[@]}\" \"$CHROME_BIN\" --no-sandbox --disable-dev-shm-usage --remote-debugging-port=9222 --user-data-dir=\"$PROFILE_BASE/.hermes/chrome-profile-desktop\" --no-first-run --no-default-browser-check about:blank > \"$HOME/.hermes/browser.log\" 2>&1 &",
+    "  else",
+    "    \"$CHROME_BIN\" --no-sandbox --disable-dev-shm-usage --remote-debugging-port=9222 --user-data-dir=\"$PROFILE_BASE/.hermes/chrome-profile-desktop\" --no-first-run --no-default-browser-check about:blank > \"$HOME/.hermes/browser.log\" 2>&1 &",
+    "  fi",
+    "  echo desktop > \"$HOME/.hermes/browser-mode\"",
+    "  echo 'browser started (desktop)'",
+    "}",
+    "",
+    "case \"$MODE\" in",
+    "  headless) start_headless || exit 1 ;;",
+    "  desktop)  start_desktop  || exit 1 ;;",
+    "  *) echo \"使い方: $0 [headless|desktop]\" >&2; exit 2 ;;",
+    "esac",
+    "wait_cdp",
+  ].join("\n");
+}
+
+function hermesStopBrowserScriptBody() {
+  return [
+    "#!/bin/bash",
+    "# Hermes 専用プロファイルのブラウザだけを停止する（KDE セッションの既存ブラウザは残す）",
+    "pkill -f 'chrome-profile' >/dev/null 2>&1 || true",
+    "pkill -f 'remote-debugging-port=9222' >/dev/null 2>&1 || true",
+    "pkill -f 'Xvfb :99' >/dev/null 2>&1 || true",
+    "rm -f \"$HOME/.hermes/browser-mode\"",
+    "echo stopped",
+  ].join("\n");
+}
+
 function hermesInstallScriptBody() {
-  // ユーザー提供の方針に沿った導入: 依存パッケージ → Hermes 導入 → Xvfb+Chromium 起動スクリプト → CDP設定
+  // ユーザー提供の方針に沿った導入: 依存パッケージ → Hermes 導入 → CDP ブラウザ起動スクリプト → CDP設定
   return [
     "set -e",
     "export PATH=\"$HOME/.local/bin:$PATH\"",
@@ -693,18 +777,9 @@ function hermesInstallScriptBody() {
     "echo '[selfcode] Hermes Agent 本体をセットアップします…'",
     "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
     "mkdir -p \"$HOME/.hermes\"",
-    "cat > \"$HOME/.hermes/start-browser.sh\" <<'SH'",
-    "#!/bin/bash",
-    "pkill -f 'Xvfb :99' >/dev/null 2>&1 || true",
-    "pkill -f 'remote-debugging-port=9222' >/dev/null 2>&1 || true",
-    "Xvfb :99 -screen 0 1280x800x24 > /dev/null 2>&1 &",
-    "export DISPLAY=:99",
-    "CHROME_BIN=\"$(command -v chromium-browser || command -v chromium || command -v google-chrome || command -v google-chrome-stable || true)\"",
-    "if [ -z \"$CHROME_BIN\" ]; then echo 'Chromium/Chrome が見つかりません'; exit 1; fi",
-    "\"$CHROME_BIN\" --no-sandbox --disable-dev-shm-usage --remote-debugging-port=9222 --headless=new --user-data-dir=\"$HOME/.hermes/chrome-profile\" about:blank > /dev/null 2>&1 &",
-    "echo 'browser started (CDP: http://localhost:9222)'",
-    "SH",
-    "chmod +x \"$HOME/.hermes/start-browser.sh\"",
+    "cat > \"$HOME/.hermes/start-browser.sh\" <<'SH'\n" + hermesBrowserScriptBody() + "\nSH",
+    "cat > \"$HOME/.hermes/stop-browser.sh\" <<'SH'\n" + hermesStopBrowserScriptBody() + "\nSH",
+    "chmod +x \"$HOME/.hermes/start-browser.sh\" \"$HOME/.hermes/stop-browser.sh\"",
     "if command -v hermes >/dev/null 2>&1; then",
     "  hermes config set browser.cdp_url http://localhost:9222 || true",
     "fi",
@@ -769,6 +844,135 @@ function startHermesInstall() {
   });
 }
 
+// CDP エンドポイント (9222) の稼働状態を返す。mode は start-browser.sh が
+// ~/.hermes/browser-mode に残した最後の起動モード。
+async function hermesBrowserStatus() {
+  const cdpUrl = "http://localhost:9222";
+  const script =
+    "curl -fsS --max-time 2 " + shq(cdpUrl + "/json/version") + " 2>/dev/null || true; " +
+    'printf "\\nMODE:"; cat "$HOME/.hermes/browser-mode" 2>/dev/null || true';
+  let raw = "";
+  try {
+    if (containerCtx) {
+      const r = await runContainer(["sh", "-c", script], { timeoutMs: 8000 });
+      raw = r.stdout.toString("utf8");
+    } else {
+      const r = await runOut("bash", ["-c", script], 8000);
+      raw = r.out || "";
+    }
+  } catch {}
+  let version = null;
+  let running = false;
+  let mode = null;
+  const modeMatch = raw.match(/^MODE:([^\s]*)/m);
+  if (modeMatch && (modeMatch[1] === "headless" || modeMatch[1] === "desktop")) mode = modeMatch[1];
+  // /json/version は整形された複数行 JSON を返すため、最初の { から最後の } までをパースする
+  const first = raw.indexOf("{");
+  const last = raw.lastIndexOf("}");
+  if (first >= 0 && last > first) {
+    try {
+      const j = JSON.parse(raw.slice(first, last + 1));
+      version = j.Browser || null;
+      running = true;
+    } catch {}
+  }
+  return { cdpUrl, running, version, mode };
+}
+
+// Hermes 用スクリプトをホスト／コンテナどちらでも実行する（scriptPath はサーバー側固定）。
+async function runHermesBrowserScript(scriptPath, extraArgs, timeoutMs) {
+  const cmd = "bash " + scriptPath + (extraArgs && extraArgs.length ? " " + extraArgs.map(shq).join(" ") : "");
+  // 注: scriptPath / extraArgs は本ファイル内の固定値のみを渡す（外部入力は来ない）
+  if (containerCtx) {
+    try {
+      const r = await runContainer(["sh", "-c", cmd], { timeoutMs: timeoutMs || 30000 });
+      return { ok: true, out: r.stdout.toString("utf8"), err: r.stderr.toString("utf8") };
+    } catch (e) {
+      return { ok: false, out: "", err: e.message || String(e) };
+    }
+  }
+  try {
+    const r = await runOut("bash", ["-c", cmd], timeoutMs || 30000);
+    return { ok: r.code === 0, out: r.out || "", err: r.err || "" };
+  } catch (e) {
+    return { ok: false, out: "", err: e.message || String(e) };
+  }
+}
+
+// /etc/passwd から uid に対応するユーザー名を引く
+function userNameOfUid(uid) {
+  try {
+    for (const line of fs.readFileSync("/etc/passwd", "utf8").split("\n")) {
+      const f = line.split(":");
+      if (f.length >= 3 && Number(f[2]) === uid) return f[0];
+    }
+  } catch {}
+  return null;
+}
+
+// KDE などのデスクトップセッションの環境を /proc から検出する。
+// systemd 上の selfcode（root）には DISPLAY / XAUTHORITY / WAYLAND_DISPLAY が
+// 引き継がれないため、デスクトップモードではこの環境を使ってブラウザを起動する。
+function detectDesktopSession() {
+  let pids;
+  try { pids = fs.readdirSync("/proc").filter((n) => /^\d+$/.test(n)); } catch { return null; }
+  for (const pid of pids) {
+    let raw;
+    try { raw = fs.readFileSync(`/proc/${pid}/environ`, "utf8"); } catch { continue; }
+    const env = {};
+    for (const kv of raw.split("\0")) {
+      const i = kv.indexOf("=");
+      if (i > 0) env[kv.slice(0, i)] = kv.slice(i + 1);
+    }
+    if (!env.DISPLAY && !env.WAYLAND_DISPLAY) continue;
+    if (!env.XAUTHORITY && !env.XDG_RUNTIME_DIR) continue;
+    let uid;
+    try { uid = fs.statSync(`/proc/${pid}`).uid; } catch { continue; }
+    if (!uid || uid === 0) continue;
+    const user = userNameOfUid(uid);
+    if (!user) continue;
+    return { uid, user, env };
+  }
+  return null;
+}
+
+// 検出したセッション環境を ~/.hermes/desktop-env に書き出し、起動スクリプトから読めるようにする。
+async function writeHermesDesktopSession(session) {
+  if (!session) return;
+  const keys = ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "XDG_SESSION_TYPE", "XDG_DATA_DIRS"];
+  const lines = keys.filter((k) => session.env[k]).map((k) => `export ${k}=${shq(session.env[k])}`);
+  if (session.env.HOME) lines.push(`export DESKTOP_HOME=${shq(session.env.HOME)}`);
+  const cmds = [
+    "mkdir -p \"$HOME/.hermes\"",
+    "cat > \"$HOME/.hermes/desktop-env\" <<'SC'",
+    lines.join("\n"),
+    "SC",
+    "printf '%s\\n' " + shq(session.user) + " > \"$HOME/.hermes/desktop-user\"",
+  ].join("\n");
+  try {
+    if (containerCtx) await runContainer(["sh", "-c", cmds], { timeoutMs: 10000 });
+    else await runOut("bash", ["-c", cmds], 10000);
+  } catch {}
+}
+
+// 既存インストールでもボタンが動くよう、起動/停止スクリプトを毎回作り直す。
+async function ensureHermesBrowserScripts() {
+  const cmds = [
+    "mkdir -p \"$HOME/.hermes\"",
+    "cat > \"$HOME/.hermes/start-browser.sh\" <<'SC'",
+    hermesBrowserScriptBody(),
+    "SC",
+    "cat > \"$HOME/.hermes/stop-browser.sh\" <<'SC'",
+    hermesStopBrowserScriptBody(),
+    "SC",
+    "chmod +x \"$HOME/.hermes/start-browser.sh\" \"$HOME/.hermes/stop-browser.sh\"",
+  ].join("\n");
+  try {
+    if (containerCtx) await runContainer(["sh", "-c", cmds], { timeoutMs: 10000 });
+    else await runOut("bash", ["-c", cmds], 10000);
+  } catch {}
+}
+
 async function hermesStatus() {
   const target = containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null;
   const cfg = await loadHermesConfig();
@@ -810,6 +1014,7 @@ async function hermesStatus() {
       finishedAt: hermesInstall.finishedAt,
       log: hermesInstall.log.slice(-40).join("\n"),
     },
+    browser: await hermesBrowserStatus(),
   };
 }
 
@@ -827,6 +1032,40 @@ app.post("/api/hermes/install", (req, res) => {
   }
   startHermesInstall();
   res.json({ ok: true });
+});
+
+app.post("/api/hermes/browser/start", async (req, res, next) => {
+  try {
+    const mode = req.body && req.body.mode === "desktop" ? "desktop" : "headless";
+    await ensureHermesBrowserScripts();
+    if (mode === "desktop") {
+      const session = detectDesktopSession();
+      if (!session && !containerCtx) {
+        return res.status(500).json({ error: "KDE デスクトップセッションが見つかりません。デスクトップモードにはログイン中の KDE セッションが必要です。" });
+      }
+      await writeHermesDesktopSession(session);
+    }
+    const r = await runHermesBrowserScript('"$HOME/.hermes/start-browser.sh"', [mode], 40000);
+    if (!r.ok) {
+      return res.status(500).json({ error: (r.err || r.out || "CDP ブラウザの起動に失敗しました").trim().slice(-1200) });
+    }
+    res.json({ ok: true, mode, output: (r.out || "").trim(), browser: await hermesBrowserStatus() });
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.post("/api/hermes/browser/stop", async (req, res, next) => {
+  try {
+    await ensureHermesBrowserScripts();
+    const r = await runHermesBrowserScript('"$HOME/.hermes/stop-browser.sh"', [], 20000);
+    if (!r.ok) {
+      return res.status(500).json({ error: (r.err || r.out || "CDP ブラウザの停止に失敗しました").trim().slice(-1200) });
+    }
+    res.json({ ok: true, output: (r.out || "").trim(), browser: await hermesBrowserStatus() });
+  } catch (e) {
+    next(e);
+  }
 });
 
 app.put("/api/hermes/settings", async (req, res, next) => {
@@ -2866,18 +3105,9 @@ const INSTALL_CMDS = {
     "fi",
     "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
     "mkdir -p \"$HOME/.hermes\"",
-    "cat > \"$HOME/.hermes/start-browser.sh\" <<'SH'",
-    "#!/bin/bash",
-    "pkill -f 'Xvfb :99' >/dev/null 2>&1 || true",
-    "pkill -f 'remote-debugging-port=9222' >/dev/null 2>&1 || true",
-    "Xvfb :99 -screen 0 1280x800x24 > /dev/null 2>&1 &",
-    "export DISPLAY=:99",
-    "CHROME_BIN=\"$(command -v chromium-browser || command -v chromium || command -v google-chrome || command -v google-chrome-stable || true)\"",
-    "if [ -z \"$CHROME_BIN\" ]; then echo 'Chromium/Chrome が見つかりません'; exit 1; fi",
-    "\"$CHROME_BIN\" --no-sandbox --disable-dev-shm-usage --remote-debugging-port=9222 --headless=new --user-data-dir=\"$HOME/.hermes/chrome-profile\" about:blank > /dev/null 2>&1 &",
-    "echo 'browser started (CDP: http://localhost:9222)'",
-    "SH",
-    "chmod +x \"$HOME/.hermes/start-browser.sh\"",
+    "cat > \"$HOME/.hermes/start-browser.sh\" <<'SH'\n" + hermesBrowserScriptBody() + "\nSH",
+    "cat > \"$HOME/.hermes/stop-browser.sh\" <<'SH'\n" + hermesStopBrowserScriptBody() + "\nSH",
+    "chmod +x \"$HOME/.hermes/start-browser.sh\" \"$HOME/.hermes/stop-browser.sh\"",
     "if command -v hermes >/dev/null 2>&1; then hermes config set browser.cdp_url http://localhost:9222 || true; fi",
     "echo '[selfcode] Hermes の導入処理が完了しました。APIキーは selfcode の Hermes パネルで設定できます。'",
   ].join("; "),

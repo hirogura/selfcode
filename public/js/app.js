@@ -2327,6 +2327,8 @@ const App = (() => {
   // ---- Hermes Agent パネル ----
   const HERMES_PANEL_KEY = "selfcode.hermesVisible";
   const HERMES_MODEL_KEY = "selfcode.hermesModel";
+  const HERMES_BROWSER_MODE_KEY = "selfcode.hermesBrowserMode";
+  let hermesBrowserMode = "headless";
   let hermesStatusCache = null;
   let hermesPollTimer = null;
 
@@ -2399,6 +2401,57 @@ const App = (() => {
     // キー入力欄のプレースホルダ的表示はしない（未入力のまま維持で既存キー保持）
     const keyStatus = $("hermes-key-status");
     if (keyStatus) keyStatus.textContent = st.hasKey ? "保存済みのAPIキーがあります（変更する場合のみ入力して保存）" : "APIキーは未設定です";
+    const browserEl = $("hermes-browser-status");
+    if (browserEl) {
+      const b = st.browser || {};
+      const modeLabel = b.mode === "desktop" ? "デスクトップ" : "ヘッドレス";
+      if (b.running) {
+        browserEl.className = "gh-status ok";
+        browserEl.textContent = [`CDP: 稼働中 (${modeLabel})`, b.cdpUrl || "http://localhost:9222", b.version || ""].filter(Boolean).join("\n");
+      } else {
+        browserEl.className = "gh-status err";
+        browserEl.textContent = "CDP: 停止中" + (b.mode ? ` (前回: ${modeLabel})` : "");
+      }
+    }
+  }
+
+  function setHermesBrowserMode(mode) {
+    hermesBrowserMode = mode === "desktop" ? "desktop" : "headless";
+    try { localStorage.setItem(HERMES_BROWSER_MODE_KEY, hermesBrowserMode); } catch {}
+    document.querySelectorAll("#hermes-browser-modes .gh-prof-tab").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.mode === hermesBrowserMode);
+    });
+  }
+
+  async function startHermesBrowser() {
+    const btn = $("btn-hermes-browser-start");
+    if (btn) btn.disabled = true;
+    try {
+      const res = await API.post("/api/hermes/browser/start", { mode: hermesBrowserMode }, undefined, 45000);
+      const last = res && res.output ? res.output.split("\n").filter(Boolean).pop() : "";
+      toast(last || "CDP ブラウザを起動しました");
+      await loadHermesStatus();
+    } catch (e) {
+      toast(e.message, true);
+      await loadHermesStatus();
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function stopHermesBrowser() {
+    const btn = $("btn-hermes-browser-stop");
+    if (btn) btn.disabled = true;
+    try {
+      await API.post("/api/hermes/browser/stop", {}, undefined, 25000);
+      toast("CDP ブラウザを停止しました");
+      await loadHermesStatus();
+    } catch (e) {
+      toast(e.message, true);
+      await loadHermesStatus();
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   async function installHermes() {
@@ -2743,6 +2796,11 @@ const App = (() => {
     };
     $("hermes-model").addEventListener("input", saveHermesModel);
     $("btn-hermes-open").onclick = () => openHermesInTerminal(hermesLaunchArgs());
+    $("btn-hermes-browser-start").onclick = startHermesBrowser;
+    $("btn-hermes-browser-stop").onclick = stopHermesBrowser;
+    document.querySelectorAll("#hermes-browser-modes .gh-prof-tab").forEach((btn) => {
+      btn.onclick = () => setHermesBrowserMode(btn.dataset.mode);
+    });
     $("btn-ssh-temp").onclick = toggleSshTemp;
     // 「一時SSH」ボタンの状態を復元
     fetch("/api/ssh-temp", { cache: "no-store" })
@@ -2783,6 +2841,8 @@ const App = (() => {
       const savedHermesModel = localStorage.getItem(HERMES_MODEL_KEY);
       if (savedHermesModel) $("hermes-model").value = savedHermesModel;
     } catch {}
+    // CDP ブラウザの起動モードを復元
+    try { setHermesBrowserMode(localStorage.getItem(HERMES_BROWSER_MODE_KEY) || "headless"); } catch {}
     // AI設定パネルの「自動承認」チェックボックス（状態の復元と保存）
     const bindAiSettingCheck = (id, key) => {
       const el = $(id);
