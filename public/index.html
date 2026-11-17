@@ -184,7 +184,15 @@
           <div class="gh-sec-head"><span>操作</span></div>
           <div class="gh-field">
             <label for="hermes-model">起動時のモデル（--model に渡されます。空欄なら既定）</label>
-            <input id="hermes-model" type="text" placeholder="例: gemini/gemini-2.5-flash" autocomplete="off" spellcheck="false">
+            <input id="hermes-model" type="text" list="hermes-model-options" placeholder="候補から選択、または直接入力" autocomplete="off" spellcheck="false">
+            <datalist id="hermes-model-options">
+              <option value="gemini/gemini-2.5-flash"></option>
+              <option value="gemini/gemini-2.5-pro"></option>
+              <option value="gemini/gemini-2.0-flash"></option>
+              <option value="openrouter/google/gemini-2.5-flash"></option>
+              <option value="anthropic/claude-sonnet-4.6"></option>
+              <option value="openai/gpt-5.5"></option>
+            </datalist>
           </div>
           <div class="gh-actions">
             <button id="btn-hermes-open" class="btn small" title="ターミナルで hermes を起動する">ターミナルでHermesを起動</button>
