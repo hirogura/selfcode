@@ -2436,10 +2436,15 @@ const App = (() => {
     }
   }
 
+  function saveHermesModel() {
+    const el = $("hermes-model");
+    try { localStorage.setItem(HERMES_MODEL_KEY, el ? el.value.trim() : ""); } catch {}
+  }
+
   function hermesLaunchArgs() {
     const el = $("hermes-model");
     const model = el ? el.value.trim() : "";
-    try { localStorage.setItem(HERMES_MODEL_KEY, model); } catch {}
+    saveHermesModel();
     return model ? ["--model", model] : undefined;
   }
 
@@ -2736,6 +2741,7 @@ const App = (() => {
       if (!el) return;
       el.type = el.type === "password" ? "text" : "password";
     };
+    $("hermes-model").addEventListener("input", saveHermesModel);
     $("btn-hermes-open").onclick = () => openHermesInTerminal(hermesLaunchArgs());
     $("btn-ssh-temp").onclick = toggleSshTemp;
     // 「一時SSH」ボタンの状態を復元
