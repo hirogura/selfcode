@@ -13,7 +13,7 @@
   <header id="topbar">
     <div class="brand">
       <span class="logo"><svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><text x="36" y="70" font-size="52" text-anchor="middle" fill="#fff" font-family="monospace" font-weight="bold">S</text><polyline points="58,40 80,54 58,68" fill="none" stroke="#d1d5db" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-      <span class="title-wrap"><span class="title">selfcode</span><span class="version">v.4.1.0</span></span>
+      <span class="title-wrap"><span class="title">selfcode</span><span class="version">v.4.2.0</span></span>
     </div>
     <button id="btn-explorer" class="btn toggle active" title="エクスプローラの表示切替"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>
     <button id="btn-refresh" class="btn" title="リフレッシュ"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
@@ -113,6 +113,19 @@
         <div class="gh-section">
           <div class="gh-sec-head"><span>Copilot</span></div>
           <label class="aibridge-check"><input type="checkbox" id="ais-copilot-auto"><span>自動承認（--allow-all 付きで起動）</span></label>
+        </div>
+        <div class="gh-section">
+          <div class="gh-sec-head">
+            <span>ヘッドレスブラウザ</span>
+            <div class="gh-sec-actions"><button id="ais-headless-browser-hint-toggle" class="btn small hint-toggle" title="説明を表示">▲</button></div>
+          </div>
+          <div class="gh-status" id="ais-headless-browser-status">読み込み中…</div>
+          <div class="gh-actions">
+            <button id="btn-headless-browser-install" class="btn small primary" title="Chromium / Xvfb と CDP ブラウザ起動スクリプトをインストールする">インストール</button>
+            <button id="btn-headless-browser-refresh" class="btn small" title="状態を再取得する">状態更新</button>
+          </div>
+          <pre id="ais-headless-browser-log" class="beacon-log" hidden></pre>
+          <div class="gh-status collapsed" id="ais-headless-browser-hint" hidden>ブラウザ操作用の CDP ブラウザ環境（Chromium 系ブラウザ / Xvfb / 依存ライブラリ）をインストールします。Hermes CLI 自体は導入しません。インストールすると <code>~/.hermes/</code> に起動・停止スクリプトを配置し、Hermes パネルの「CDPブラウザ起動」から <code>http://localhost:9222</code> で起動できます。コンテナ選択中はそのコンテナ内に導入します。</div>
         </div>
         <div class="gh-section">
           <div class="gh-sec-head"><span>beacon.sh（記憶層管理）</span></div>

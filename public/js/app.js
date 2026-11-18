@@ -1599,6 +1599,94 @@ const App = (() => {
     revealInExplorer(rel);
   }
 
+  // ---- ヘッドレスブラウザカード（AI設定パネル） ----
+  // Chromium / Xvfb / CDP 起動スクリプトを導入する（Hermes CLI 自体は導入しない）
+  let headlessBrowserStatusCache = null;
+  let headlessBrowserPollTimer = null;
+
+  function headlessBrowserButtons() {
+    return {
+      install: $("btn-headless-browser-install"),
+      refresh: $("btn-headless-browser-refresh"),
+      status: $("ais-headless-browser-status"),
+      log: $("ais-headless-browser-log"),
+    };
+  }
+
+  async function loadHeadlessBrowserStatus(showToast) {
+    const btns = headlessBrowserButtons();
+    if (!btns.status) return null;
+    try {
+      const st = await API.get("/api/headless-browser/status", undefined, 20000);
+      headlessBrowserStatusCache = st;
+      renderHeadlessBrowserStatus(st);
+      if (showToast) toast("ヘッドレスブラウザの状態を更新しました");
+      return st;
+    } catch (e) {
+      btns.status.textContent = "状態を取得できませんでした: " + e.message;
+      if (showToast) toast(e.message, true);
+      return null;
+    }
+  }
+
+  function renderHeadlessBrowserStatus(st) {
+    const btns = headlessBrowserButtons();
+    if (!btns.status) return;
+    const bits = [];
+    if (st.target) bits.push(`対象: コンテナ「${st.target.name}」`);
+    else bits.push("対象: ホスト");
+    if (st.installed) {
+      bits.push(`インストール済み${st.version ? ` (${st.version})` : ""}`);
+      if (st.binPath) bits.push(`ブラウザ: ${st.binPath}`);
+      bits.push(`Xvfb: ${st.xvfb ? "あり" : "なし"}`);
+    } else {
+      bits.push("未インストール（「インストール」で Chromium / Xvfb を導入できます）");
+    }
+    const cdp = st.cdp || {};
+    bits.push(cdp.running ? `CDP: 稼働中 (${cdp.cdpUrl || "http://localhost:9222"})` : "CDP: 停止中");
+    if (st.install && st.install.running) bits.push("インストール: 実行中…");
+    else if (st.install && st.install.ok === true) bits.push("インストール: 完了");
+    else if (st.install && st.install.ok === false) bits.push("インストール: 失敗");
+    btns.status.textContent = bits.join("\n");
+
+    if (btns.log) {
+      const log = (st.install && st.install.log) || "";
+      btns.log.hidden = !log;
+      btns.log.textContent = log;
+      btns.log.scrollTop = btns.log.scrollHeight;
+    }
+    // 実行中だけ無効化（ブラウザが導入済みでもスクリプトの再配置に使えるようにする）
+    if (btns.install) btns.install.disabled = !!(st.install && st.install.running);
+    clearInterval(headlessBrowserPollTimer);
+    headlessBrowserPollTimer = null;
+    if (st.install && st.install.running && aiSettingsVisible()) {
+      headlessBrowserPollTimer = setInterval(loadHeadlessBrowserStatus, 2000);
+    }
+  }
+
+  async function installHeadlessBrowser() {
+    const st = headlessBrowserStatusCache;
+    const inContainer = !!(st && st.target);
+    if (!confirm(
+      `${inContainer ? `コンテナ「${st.target.name}」内に ` : ""}ヘッドレスブラウザ環境をインストールしますか？\n\n` +
+      "・Chromium 系ブラウザ / Xvfb / 依存ライブラリを導入\n" +
+      "・~/.hermes/ に CDP ブラウザの起動・停止スクリプトを配置\n" +
+      "・Hermes CLI 自体はインストールしません\n" +
+      "\n完了するとこのカードの状態とログに反映されます。"
+    )) return;
+    try {
+      await API.post("/api/headless-browser/install", {}, undefined, 8000);
+      toast("ヘッドレスブラウザのインストールを開始しました");
+      const btns = headlessBrowserButtons();
+      if (btns.log) btns.log.hidden = false;
+      if (btns.status) btns.status.textContent = "インストール中…";
+      await loadHeadlessBrowserStatus();
+    } catch (e) {
+      toast(e.message, true);
+      loadHeadlessBrowserStatus();
+    }
+  }
+
   // 「一時SSH」ボタン: agy などの OAuth 認証を手元 PC から行えるよう、
   // 選択中のコンテナ（未選択ならホスト）の SSH パスワード認証を一時的に有効化する
   async function toggleSshTemp() {
@@ -2848,6 +2936,12 @@ const App = (() => {
     bindHintToggle("ais-beacon-hint-toggle", "ais-beacon-hint");
     bindHintToggle("aisettings-ssh-hint-toggle", "aisettings-ssh-hint");
     bindHintToggle("ais-notify-hint-toggle", "ais-notify-hint");
+    bindHintToggle("ais-headless-browser-hint-toggle", "ais-headless-browser-hint");
+    // ヘッドレスブラウザカード: 状態表示とインストール
+    const hbBtns = headlessBrowserButtons();
+    if (hbBtns.refresh) hbBtns.refresh.onclick = () => loadHeadlessBrowserStatus(true);
+    if (hbBtns.install) hbBtns.install.onclick = installHeadlessBrowser;
+    loadHeadlessBrowserStatus();
     // AI設定パネルの表示状態を復元
     try { if (localStorage.getItem(AI_SETTINGS_KEY) === "1") showAiSettings(); } catch {}
     try { if (localStorage.getItem(HERMES_PANEL_KEY) === "1") showHermesPanel(); } catch {}

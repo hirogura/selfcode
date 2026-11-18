@@ -205,7 +205,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "4.1.0",
+    version: "4.2.0",
     bootId: BOOT_ID,
     workspace: ROOT,
     distro: DISTRO,
@@ -641,6 +641,9 @@ const HERMES_CONFIG = process.env.SELFCODE_HERMES_CONFIG || SELFCODE_CONFIG_DIR 
 let hermesConfigCache = null;
 const hermesInstall = { running: false, startedAt: null, finishedAt: null, ok: null, log: [], child: null, target: null };
 const HERMES_INSTALL_LOG_MAX = 200;
+// ヘッドレスブラウザ単体のインストール状態（Hermes CLI 本体は導入しない）
+const headlessBrowserInstall = { running: false, startedAt: null, finishedAt: null, ok: null, log: [], child: null, target: null };
+const HEADLESS_BROWSER_INSTALL_LOG_MAX = 200;
 
 async function loadHermesConfig() {
   if (hermesConfigCache) return hermesConfigCache;
@@ -654,14 +657,19 @@ async function saveHermesConfig() {
   await writeStateFile(HERMES_CONFIG, hermesConfigCache || { geminiApiKey: "" });
 }
 
-function hermesLogPush(chunk) {
+// インストール進捗ログの共通処理（Hermes / ヘッドレスブラウザで同じ形式を使う）
+function pushInstallLog(state, chunk, max) {
   for (const line of String(chunk || "").split(/\r?\n/)) {
     if (!line.trim()) continue;
-    hermesInstall.log.push(line.slice(0, 500));
+    state.log.push(line.slice(0, 500));
   }
-  if (hermesInstall.log.length > HERMES_INSTALL_LOG_MAX) {
-    hermesInstall.log.splice(0, hermesInstall.log.length - HERMES_INSTALL_LOG_MAX);
+  if (state.log.length > max) {
+    state.log.splice(0, state.log.length - max);
   }
+}
+
+function hermesLogPush(chunk) {
+  pushInstallLog(hermesInstall, chunk, HERMES_INSTALL_LOG_MAX);
 }
 
 function finishHermesInstall(ok) {
@@ -756,12 +764,9 @@ function hermesStopBrowserScriptBody() {
   ].join("\n");
 }
 
-function hermesInstallScriptBody() {
-  // ユーザー提供の方針に沿った導入: 依存パッケージ → Hermes 導入 → CDP ブラウザ起動スクリプト → CDP設定
+// Chromium 系ブラウザ / Xvfb / 依存ライブラリの導入（Hermes とヘッドレスブラウザで共通）
+function browserDepsScriptLines() {
   return [
-    "set -e",
-    "export PATH=\"$HOME/.local/bin:$PATH\"",
-    "echo '[selfcode] Hermes Agent のインストールを開始します…'",
     "if command -v apt-get >/dev/null 2>&1; then",
     "  (sudo -n apt-get update || apt-get update || true)",
     "  (sudo -n apt-get install -y chromium-browser xvfb libnss3 libatk1.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 curl git || apt-get install -y chromium-browser xvfb libnss3 libatk1.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 curl git || sudo -n apt-get install -y chromium xvfb libnss3 libatk1.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 curl git || apt-get install -y chromium xvfb libnss3 libatk1.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 curl git || true)",
@@ -774,6 +779,16 @@ function hermesInstallScriptBody() {
     "elif command -v yum >/dev/null 2>&1; then",
     "  (sudo -n yum install -y chromium xvfb nss atk cups-libs libdrm libxkbcommon libXcomposite libXdamage libXrandr mesa-libgbm pango cairo curl git || yum install -y chromium xvfb nss atk cups-libs libdrm libxkbcommon libXcomposite libXdamage libXrandr mesa-libgbm pango cairo curl git || true)",
     "fi",
+  ];
+}
+
+function hermesInstallScriptBody() {
+  // ユーザー提供の方針に沿った導入: 依存パッケージ → Hermes 導入 → CDP ブラウザ起動スクリプト → CDP設定
+  return [
+    "set -e",
+    "export PATH=\"$HOME/.local/bin:$PATH\"",
+    "echo '[selfcode] Hermes Agent のインストールを開始します…'",
+    ...browserDepsScriptLines(),
     "echo '[selfcode] Hermes Agent 本体をセットアップします…'",
     "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash",
     "mkdir -p \"$HOME/.hermes\"",
@@ -842,6 +857,120 @@ function startHermesInstall() {
       finishHermesInstall(false);
     }
   });
+}
+
+function headlessBrowserLogPush(chunk) {
+  pushInstallLog(headlessBrowserInstall, chunk, HEADLESS_BROWSER_INSTALL_LOG_MAX);
+}
+
+function finishHeadlessBrowserInstall(ok) {
+  headlessBrowserInstall.running = false;
+  headlessBrowserInstall.ok = ok;
+  headlessBrowserInstall.finishedAt = Date.now();
+  headlessBrowserInstall.child = null;
+  console.log(`[selfcode] headless browser install ${ok ? "finished" : "failed"}`);
+}
+
+// ヘッドレスブラウザ環境のみを導入する（Hermes CLI 本体は入れない）。
+// 依存パッケージと CDP ブラウザの起動／停止スクリプトを配置する。
+function headlessBrowserInstallScriptBody() {
+  return [
+    "set -e",
+    "export PATH=\"$HOME/.local/bin:$PATH\"",
+    "echo '[selfcode] ヘッドレスブラウザ環境のインストールを開始します…'",
+    ...browserDepsScriptLines(),
+    "mkdir -p \"$HOME/.hermes\"",
+    "cat > \"$HOME/.hermes/start-browser.sh\" <<'SH'\n" + hermesBrowserScriptBody() + "\nSH",
+    "cat > \"$HOME/.hermes/stop-browser.sh\" <<'SH'\n" + hermesStopBrowserScriptBody() + "\nSH",
+    "chmod +x \"$HOME/.hermes/start-browser.sh\" \"$HOME/.hermes/stop-browser.sh\"",
+    // Hermes が導入済みなら CDP 接続先を設定（未導入なら何もしない）
+    "if command -v hermes >/dev/null 2>&1; then hermes config set browser.cdp_url http://localhost:9222 || true; fi",
+    "echo '[selfcode] ヘッドレスブラウザ環境のインストールが完了しました'",
+  ].join("\n");
+}
+
+function startHeadlessBrowserInstall() {
+  if (headlessBrowserInstall.running) return;
+  headlessBrowserInstall.running = true;
+  headlessBrowserInstall.startedAt = Date.now();
+  headlessBrowserInstall.finishedAt = null;
+  headlessBrowserInstall.ok = null;
+  headlessBrowserInstall.log = [];
+  headlessBrowserInstall.target = containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null;
+  console.log("[selfcode] headless browser install started" + (headlessBrowserInstall.target ? ` (container: ${headlessBrowserInstall.target.name})` : ""));
+  let child;
+  if (headlessBrowserInstall.target) {
+    child = spawn(containerBin(headlessBrowserInstall.target.runtime), containerExecArgs(headlessBrowserInstall.target.runtime, headlessBrowserInstall.target.name, false).concat(["bash", "-lc", headlessBrowserInstallScriptBody()]), {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } else {
+    child = spawn("bash", ["-lc", headlessBrowserInstallScriptBody()], {
+      env: { ...process.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  }
+  headlessBrowserInstall.child = child;
+  child.stdout.on("data", (d) => headlessBrowserLogPush(d));
+  child.stderr.on("data", (d) => headlessBrowserLogPush(d));
+  child.on("error", (e) => {
+    headlessBrowserLogPush("[selfcode] インストールの起動に失敗しました: " + e.message);
+    finishHeadlessBrowserInstall(false);
+  });
+  child.on("close", (code) => {
+    if (code === 0) {
+      headlessBrowserLogPush("[selfcode] インストールが完了しました。Hermes パネルの「CDPブラウザ起動」から起動できます。");
+      finishHeadlessBrowserInstall(true);
+    } else {
+      headlessBrowserLogPush(`[selfcode] インストールに失敗しました (exit ${code})`);
+      finishHeadlessBrowserInstall(false);
+    }
+  });
+}
+
+// ブラウザバイナリ／Xvfb／CDP の状態を返す（選択中コンテナがあれば対象はコンテナ内）。
+async function headlessBrowserStatus() {
+  const target = containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null;
+  let binPath = null;
+  let version = null;
+  let xvfb = false;
+  try {
+    const script = [
+      'export PATH="$HOME/.local/bin:$PATH"',
+      'B="$(command -v cachyos-browser || command -v chromium-browser || command -v chromium || command -v google-chrome || command -v google-chrome-stable || true)"',
+      'echo "bin:$B"',
+      'if [ -n "$B" ]; then echo "ver:$("$B" --version 2>/dev/null | head -n 1)"; fi',
+      'if command -v Xvfb >/dev/null 2>&1; then echo "xvfb:1"; else echo "xvfb:0"; fi',
+    ].join("; ");
+    let raw = "";
+    if (containerCtx) {
+      const r = await runContainer(["sh", "-lc", script], { timeoutMs: 15000 });
+      raw = r.stdout.toString("utf8");
+    } else {
+      const r = await runOut("bash", ["-lc", script], 15000);
+      raw = (r.out || "") + "\n" + (r.err || "");
+    }
+    for (const line of raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)) {
+      if (line.startsWith("bin:")) binPath = line.slice(4) || null;
+      else if (line.startsWith("ver:")) version = line.slice(4) || null;
+      else if (line === "xvfb:1") xvfb = true;
+    }
+  } catch {}
+  return {
+    installed: !!binPath,
+    binPath,
+    version,
+    xvfb,
+    target,
+    install: {
+      running: headlessBrowserInstall.running,
+      ok: headlessBrowserInstall.ok,
+      target: headlessBrowserInstall.target,
+      startedAt: headlessBrowserInstall.startedAt,
+      finishedAt: headlessBrowserInstall.finishedAt,
+      log: headlessBrowserInstall.log.slice(-40).join("\n"),
+    },
+    cdp: await hermesBrowserStatus(),
+  };
 }
 
 // CDP エンドポイント (9222) の稼働状態を返す。mode は start-browser.sh が
@@ -1095,6 +1224,24 @@ app.delete("/api/hermes/settings", async (req, res, next) => {
   } catch (e) {
     next(e);
   }
+});
+
+// ================= ヘッドレスブラウザ（AI設定パネルのカード用） =================
+// Hermes CLI を導入せずに Chromium / Xvfb / CDP 起動スクリプトだけを入れる。
+app.get("/api/headless-browser/status", async (req, res, next) => {
+  try {
+    res.json(await headlessBrowserStatus());
+  } catch (e) {
+    next(e);
+  }
+});
+
+app.post("/api/headless-browser/install", (req, res) => {
+  if (headlessBrowserInstall.running) {
+    return res.status(409).json({ error: "ヘッドレスブラウザのインストールが進行中です" });
+  }
+  startHeadlessBrowserInstall();
+  res.json({ ok: true });
 });
 
 // ================= 一時SSH（agy などの OAuth 認証を手元 PC から行えるようにする） =================

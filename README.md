@@ -1,6 +1,6 @@
 # selfcode
 
-code-server のようにブラウザから使えて、opencode / freebuff / cline / kilo / Antigravity (agy) / GitHub Copilot CLI / Hermes などの AI エージェント連携や GitHub 連携がある、セルフホスト型コードエディタです。現在のバージョンは **v4.1.0** です。
+code-server のようにブラウザから使えて、opencode / freebuff / cline / kilo / Antigravity (agy) / GitHub Copilot CLI / Hermes などの AI エージェント連携や GitHub 連携がある、セルフホスト型コードエディタです。現在のバージョンは **v4.2.0** です。
 
 - Monaco エディタ（VS Code と同じエディタエンジン）
 - ファイルツリー / タブ編集 / 保存（Ctrl+S） / ファイル・フォルダのダウンロード（ホストは ZIP、コンテナ内は tar.gz）
@@ -162,6 +162,10 @@ sudo tailscale serve --bg --https=3339 http://127.0.0.1:3339
   - Copilot は導入済みならそのまま起動します。初回は起動後に `/login` と入力して GitHub に認証してください
   - AI設定パネルの **Copilot** カードで「自動承認」を ON にすると、`--allow-all`（全ツール・パス・URL の承認をスキップ）付きで起動します
   - **root** ボタン（root モード）を ON にすると、これらを root 権限で起動します
+- **AI設定** パネルの **ヘッドレスブラウザ** カード（Copilot カードの下）で、ブラウザ操作用の CDP 環境を単独でインストールできます
+  - **インストール**： Chromium 系ブラウザ / Xvfb / 依存ライブラリを導入し、`~/.hermes/` に CDP ブラウザの起動・停止スクリプトを配置します（Hermes CLI 自体は導入しません。コンテナ選択中はコンテナ内に導入）
+  - **状態更新**： ブラウザのバージョン・Xvfb の有無・CDP (`http://localhost:9222`) の稼働状態を表示します（インストールの進捗は同カードのログに表示）
+  - 実際のブラウザ起動は Hermes パネルの「ブラウザ (CDP)」セクションから行います
 - 右上の **一時SSH** ボタンで、agy などの OAuth 認証を手元 PC から行えるようにする（トグル）
   - **ON**: 選択中の LXD コンテナ（未選択ならホスト）の root パスワードを `selfcode` に設定し、SSH のパスワード認証・root ログインを有効化して sshd を再起動
   - openssh-server が未導入の場合は確認を表示し、`y` で pacman（CachyOS/Arch）または apt（Debian系）から自動インストールしてから有効化
