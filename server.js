@@ -205,7 +205,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "3.9.0",
+    version: "4.0.0",
     bootId: BOOT_ID,
     workspace: ROOT,
     distro: DISTRO,
@@ -3011,6 +3011,12 @@ function findBin(name, pathStr, extraHome) {
     for (const h of homes) candidates.push(path.join(h, ".local/bin/agy"));
     candidates.push("/usr/local/bin/agy", "/usr/bin/agy");
   }
+  // GitHub Copilot CLI (copilot) は公式インストーラで ~/.local/bin（root は /usr/local/bin）に導入される
+  if (name === "copilot") {
+    const homes = [process.env.HOME || os.homedir(), extraHome].filter(Boolean);
+    for (const h of homes) candidates.push(path.join(h, ".local/bin/copilot"));
+    candidates.push("/usr/local/bin/copilot", "/usr/bin/copilot");
+  }
   // kilo は ~/.kilo/bin または ~/.local/bin にインストールされることがある
   if (name === "kilo") {
     const homes = [process.env.HOME || os.homedir(), extraHome].filter(Boolean);
@@ -3075,6 +3081,10 @@ const INSTALL_CMDS = {
       'if [ "$(id -u)" = "0" ]; then npm install -g cline; else sudo npm install -g cline; fi',
   agy:
     'export PATH="$HOME/.local/bin:$PATH"; curl -fsSL https://antigravity.google/cli/install.sh | bash; if [ "$(id -u)" = "0" ] && [ -f /root/.local/bin/agy ]; then cp -f /root/.local/bin/agy /usr/local/bin/agy 2>/dev/null && chmod 755 /usr/local/bin/agy 2>/dev/null || true; fi',
+  // GitHub Copilot CLI は公式インストーラ（gh.io/copilot-install）で導入する（非 root は ~/.local/bin、
+  // root は /usr/local/bin に配置）。起動は selfcode 側で行うため、ここでは認証方法を案内する。
+  copilot:
+    "export PATH=\"$HOME/.local/bin:$PATH\"; curl -fsSL https://gh.io/copilot-install | bash; echo '[selfcode] Copilot CLI を起動したら /login で GitHub に認証してください'",
   kilo:
     'export PATH="$HOME/.kilo/bin:$HOME/.local/bin:$PATH"; curl -fsSL https://kilo.ai/cli/install | bash; if [ "$(id -u)" = "0" ] && [ -f /root/.kilo/bin/kilo ]; then cp -f /root/.kilo/bin/kilo /usr/local/bin/kilo 2>/dev/null && chmod 755 /usr/local/bin/kilo 2>/dev/null || true; fi; if command -v kilo >/dev/null 2>&1; then echo "[selfcode] kilo auth login を実行します…"; kilo auth login; fi',
   // beacon.sh (Agent Beacon) は公式リリースの install.sh から導入する（systemd 環境では
@@ -3489,7 +3499,7 @@ wss.on("connection", (ws, req) => {
       // 保存済みの cwd がコンテナ内に無い場合でもシェルは起動するように cd 失敗は無視する
       // procArgs もシェルエスケープして埋め込む（インストール確認スクリプトの起動用）
       const argStr = procArgs && procArgs.length ? " " + procArgs.map(shq).join(" ") : "";
-      // opencode は ~/.opencode/bin、Antigravity CLI (agy) は ~/.local/bin、kilo は ~/.kilo/bin にインストールされるため、
+      // opencode は ~/.opencode/bin、Antigravity CLI (agy) / Copilot CLI は ~/.local/bin、kilo は ~/.kilo/bin にインストールされるため、
       // コンテナ内の PATH にも追加しておく（インストール判定と実行で同じ PATH にする）
       const inner = `${dir ? `cd ${shq(dir)} 2>/dev/null || true; ` : ""}export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$HOME/.kilo/bin:$PATH"; exec ${procCmd}${argStr}`;
       bin = containerBin(containerCtx.runtime);
@@ -3529,7 +3539,7 @@ wss.on("connection", (ws, req) => {
         args = procArgs || [];
         cwd = dir;
         // 同上: 実行ユーザーの ~/.opencode/bin / ~/.local/bin / ~/.kilo/bin を PATH に追加
-        // （opencode / agy / kilo などを、シェルの設定ファイルに依存せず直接起動できるように）
+        // （opencode / agy / kilo / copilot などを、シェルの設定ファイルに依存せず直接起動できるように）
         const home = userHomeOf(curUser);
         procEnv = { ...procEnv, ...keyringEnv, PATH: `${home}/.opencode/bin:${home}/.local/bin:${home}/.kilo/bin:${procEnv.PATH}` };
       }
@@ -3596,7 +3606,7 @@ wss.on("connection", (ws, req) => {
       if (INSTALL_CMDS[cmd]) {
         let found = false;
         try {
-          // opencode は ~/.opencode/bin、Antigravity CLI (agy) は ~/.local/bin、kilo は ~/.kilo/bin にインストールされるため、インストール判定の PATH にも追加する
+          // opencode は ~/.opencode/bin、Antigravity CLI (agy) / Copilot CLI は ~/.local/bin、kilo は ~/.kilo/bin にインストールされるため、インストール判定の PATH にも追加する
           const { stdout } = await runContainer(["sh", "-c", 'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$HOME/.kilo/bin:$PATH"; command -v ' + cmd], { timeoutMs: 8000 });
           found = stdout.toString("utf8").trim().length > 0;
         } catch {}
@@ -3617,8 +3627,8 @@ wss.on("connection", (ws, req) => {
     if (!st.isDirectory()) throw new Error("not a directory");
     // root モードが ON の場合は root で実行する
     const execUser = (forceRoot && IS_ROOT) ? "root" : rec.user;
-    // 未インストールのコマンド（opencode / freebuff / cline / agy）は確認してからインストールする
-    // （判定はターミナルが実際に使う PATH = env.PATH で行う。agy は端末ユーザーの ~/.local/bin も対象）
+    // 未インストールのコマンド（opencode / freebuff / cline / agy / copilot）は確認してからインストールする
+    // （判定はターミナルが実際に使う PATH = env.PATH で行う。agy / copilot は端末ユーザーの ~/.local/bin も対象）
     const userHome = execUser ? userHomeOf(execUser) : (process.env.HOME || os.homedir());
     if (!findBin(cmd, env.PATH, userHome) && INSTALL_CMDS[cmd]) {
       spawnInstallFlow(dir, cmd, INSTALL_CMDS[cmd], execUser);

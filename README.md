@@ -1,14 +1,14 @@
 # selfcode
 
-code-server のようにブラウザから使えて、opencode / freebuff / cline / kilo / Antigravity (agy) / Hermes などの AI エージェント連携や GitHub 連携がある、セルフホスト型コードエディタです。現在のバージョンは **v3.9.0** です。
+code-server のようにブラウザから使えて、opencode / freebuff / cline / kilo / Antigravity (agy) / GitHub Copilot CLI / Hermes などの AI エージェント連携や GitHub 連携がある、セルフホスト型コードエディタです。現在のバージョンは **v4.0.0** です。
 
 - Monaco エディタ（VS Code と同じエディタエンジン）
 - ファイルツリー / タブ編集 / 保存（Ctrl+S） / ファイル・フォルダのダウンロード（ホストは ZIP、コンテナ内は tar.gz）
 - xterm.js ターミナル（**分割**・**ユーザー切替**・**リフレッシュ**対応）
-- **opencode / freebuff / cline / kilo / agy (Antigravity CLI)** ボタンでターミナルを分割して CLI を起動（未インストールなら確認して自動インストール）。**root モード**でこれらを root 権限で起動することも可能
+- **opencode / freebuff / cline / kilo / agy (Antigravity CLI) / Copilot (GitHub Copilot CLI)** ボタンでターミナルを分割して CLI を起動（未インストールなら確認して自動インストール）。**root モード**でこれらを root 権限で起動することも可能
 - **Hermes Agent パネル**：Hermes CLI の導入・Gemini API キー（GOOGLE_API_KEY）設定・起動時モデルの指定（候補から選択／直接入力、入力内容は即時保存）、およびブラウザ操作用 **CDP ブラウザ**（`http://localhost:9222`）の起動・停止。起動モードは**ヘッドレス**（Xvfb 上の専用ブラウザでデスクトップに影響しない）と**デスクトップ**（KDE セッションにウィンドウを表示。ログイン中の KDE セッションが必要）から選べます
 - **一時SSH** ボタンで、agy などの OAuth 認証を手元 PC から行えるよう SSH のパスワード認証・root ログインを一時的に有効化（もう一度押すと解除）
-- **通知表示**（AI設定パネル）チェックボックスで、AI ツール（opencode / freebuff / cline / kilo / agy）のタスク完了時や質問・承認確認など入力待ちの発生時に通知。ページ内トーストに加え、OS 通知（Service Worker 経由、クリックでタブへ復帰）・タブタイトルの点滅・着信音にも対応
+- **通知表示**（AI設定パネル）チェックボックスで、AI ツール（opencode / freebuff / cline / kilo / agy / copilot）のタスク完了時や質問・承認確認など入力待ちの発生時に通知。ページ内トーストに加え、OS 通知（Service Worker 経由、クリックでタブへ復帰）・タブタイトルの点滅・着信音にも対応
 - **beacon.sh (Agent Beacon) 連携**（AI設定パネルの beacon.sh カード）： opencode / Claude Code / Codex など 20+ ハーネスのセッションをローカルに集約する共通記憶層。状態表示・再起動・停止・再インストール・記憶フォルダを開く・オンデマンドインストールが UI から可能。コンテナ（lxc / docker exec の対象）を表示中はコンテナ内の状態を見て、「インストール」もコンテナ内に導入する（systemd が無いコンテナではサービスは「停止中」表示になるとともに、いつでもインストールできる）
 - **LXD / Docker コンテナ連携**（コンテナ内のファイル操作・ターミナル）
 - **GitHub 連携**（設定1/設定2 の2プロファイル対応のユーザー名・トークン保存、リポジトリのクローン登録、status / fetch / pull / ログ表示、.gitignore / AGENTS.md の作成とテンプレート編集、リモート追加・初回 push）
@@ -42,7 +42,7 @@ sudo bash /tmp/install-selfcode.sh
 ```
 
 - 既定のインストール先は `/opt/lxd-data/selfcode`（第1引数で変更可: `sudo bash install-selfcode.sh /srv/selfcode`）
-- `opencode` / `freebuff` / `cline` / `kilo` / Antigravity CLI (`agy`) / `Hermes` が未導入の場合は、ターミナル上のボタンや Hermes パネルから確認のうえインストールできます（Enter または `y` で進む。スクリプト自体は CLI を導入しません）
+- `opencode` / `freebuff` / `cline` / `kilo` / Antigravity CLI (`agy`) / GitHub Copilot CLI (`copilot`) / `Hermes` が未導入の場合は、ターミナル上のボタンや Hermes パネルから確認のうえインストールできます（Enter または `y` で進む。スクリプト自体は CLI を導入しません）
 - beacon.sh (Agent Beacon) 用のデータ置き場 `/opt/lxd-data/beacon`（`BEACON_DATA_DIR`）を自動作成し、`/etc/environment` と `selfcode.service` に永続化します。CLI 自体は「AI設定 → beacon.sh」カードからオンデマンドでインストールできます（スクリプト自体は beacon を導入しません）
 - systemd サービス `selfcode.service` の登録・自動起動も行います
 - **Tailscale を導入済みなら、確認のうえ `tailscale serve` で Tailnet 内のみに公開**します（完了メッセージにアクセス URL を表示）
@@ -71,6 +71,10 @@ curl -fsSL https://antigravity.google/cli/install.sh | bash
 
 # kilo（公式インストーラ。~/.kilo/bin または ~/.local/bin に導入される。導入後に kilo auth login）
 curl -fsSL https://kilo.ai/cli/install | bash
+
+# GitHub Copilot CLI（公式インストーラ。非 root は ~/.local/bin、root は /usr/local/bin に導入される）
+curl -fsSL https://gh.io/copilot-install | bash
+# 初回起動後に /login で GitHub に認証（selfcode の Copilot ボタンから起動しても可）
 
 # Hermes Agent（公式インストーラ。~/.local/bin などに導入される）
 # CDP ブラウザ用の Chromium / Xvfb も必要なら、Hermes パネルの「インストール」から導入できます
@@ -153,15 +157,16 @@ sudo tailscale serve --bg --https=3339 http://127.0.0.1:3339
 ## 使い方
 
 - 左の EXPLORER からファイルを開き、`Ctrl+S` で保存。ファイル／フォルダは右クリックから **ダウンロード**（ホストは ZIP、コンテナ内は tar.gz）できます
-- 右上の **opencode** / **cline** / **kilo** / **freebuff** / **agy**（Antigravity CLI）ボタンで、**ターミナルを分割**して新しいペインで各 CLI を起動
+- 右上の **opencode** / **cline** / **kilo** / **freebuff** / **agy**（Antigravity CLI）/ **Copilot**（GitHub Copilot CLI）ボタンで、**ターミナルを分割**して新しいペインで各 CLI を起動
   - CLI が未インストールの場合は `[Y/n]` で確認（Enter または `y` で自動インストールして起動。kilo は導入後に `kilo auth login` も実行されます）
+  - Copilot は導入済みならそのまま起動します。初回は起動後に `/login` と入力して GitHub に認証してください
   - **root** ボタン（root モード）を ON にすると、これらを root 権限で起動します
 - 右上の **一時SSH** ボタンで、agy などの OAuth 認証を手元 PC から行えるようにする（トグル）
   - **ON**: 選択中の LXD コンテナ（未選択ならホスト）の root パスワードを `selfcode` に設定し、SSH のパスワード認証・root ログインを有効化して sshd を再起動
   - openssh-server が未導入の場合は確認を表示し、`y` で pacman（CachyOS/Arch）または apt（Debian系）から自動インストールしてから有効化
   - 手元 PC から `ssh -L <ポート>:localhost:<ポート> root@<IP>` でコンテナへポートを転送し、接続したら `agy` と入力して認証 URL を確認、手元 PC のブラウザで認証（Tailscale 利用時はマジックDNS名 `root@<ホスト名>` でも接続可能。手順は ON 時にターミナルへ案内表示）
   - 認証完了後、もう一度ボタンを押して **OFF** にすると、バックアップした sshd 設定と root パスワードを復元
-- **AI設定** パネルの **通知表示** チェックボックスを ON にすると、ターミナルの AI ツール（opencode / freebuff / cline / kilo / agy）が質問・承認確認などで入力待ちになったときや実行が完了したときに、**ページ内トースト＋OS 通知**（Service Worker 経由。クリックで selfcode のタブへ戻れます）でお知らせ。タブを開いていない／他のタブを見ているときは**タブタイトルの点滅と着信音**も鳴ります（HTTPS または localhost で開いてください。通知が許可されていない場合もトースト・点滅・着信音は動作します）
+- **AI設定** パネルの **通知表示** チェックボックスを ON にすると、ターミナルの AI ツール（opencode / freebuff / cline / kilo / agy / copilot）が質問・承認確認などで入力待ちになったときや実行が完了したときに、**ページ内トースト＋OS 通知**（Service Worker 経由。クリックで selfcode のタブへ戻れます）でお知らせ。タブを開いていない／他のタブを見ているときは**タブタイトルの点滅と着信音**も鳴ります（HTTPS または localhost で開いてください。通知が許可されていない場合もトースト・点滅・着信音は動作します）
 - **AI設定** パネルの **beacon.sh（記憶層管理）** カードで、AI エージェントの共通記憶層 (beacon.sh / Agent Beacon) を管理
   - **状態更新**： バージョン・beacon-collector サービスの稼働状態・記憶データ置き場を表示
   - **再起動**： beacon-collector サービス（エンドポイントの常駐プロセス）を再起動
@@ -231,6 +236,7 @@ sudo rm -rf /opt/lxd-data/selfcode
 rm -rf ~/.opencode            # opencode（~/.opencode/bin/opencode）
 sudo npm uninstall -g freebuff cline
 rm -f ~/.local/bin/agy         # Antigravity CLI (agy)
+rm -f ~/.local/bin/copilot /usr/local/bin/copilot   # GitHub Copilot CLI (copilot)
 rm -rf ~/.kilo ~/.local/bin/kilo /usr/local/bin/kilo   # kilo
 rm -rf ~/.hermes ~/.local/bin/hermes /usr/local/bin/hermes   # Hermes（CDP ブラウザのプロファイル・ログも含む）
 sudo apt purge beacon || sudo dnf remove beacon || sudo rpm -e beacon   # beacon.sh (systemd 環境は beacon-collector も停止)

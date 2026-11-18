@@ -21,7 +21,7 @@ const App = (() => {
   let containerInfo = null; // { name, runtime } | null
   let termUser = "root"; // ホスト側ターミナルの既定ユーザー（/api/status から取得）
   let termIsRoot = false; // サーバーが root で動いているか（root のときのみユーザー切替可能）
-  let rootMode = false; // root モード（ON で opencode/cline/freebuff/agy を root で実行）
+  let rootMode = false; // root モード（ON で opencode/cline/freebuff/agy/copilot を root で実行）
   let editor = null;
   const docs = new Map();
   const models = new Map();
@@ -377,6 +377,7 @@ const App = (() => {
       items.push({ label: "ここで kilo", act: () => openKiloAt(target.dir) });
       items.push({ label: "ここで freebuff", act: () => openFreebuffAt(target.dir) });
       items.push({ label: "ここで agy", act: () => openAgyAt(target.dir) });
+      items.push({ label: "ここで Copilot", act: () => openCopilotAt(target.dir) });
       items.push({ label: "パスをコピー", act: () => copyPath(target.path) });
       items.push({ sep: true });
       items.push({ label: "アップロード", act: () => uploadFiles(target.dir) });
@@ -392,6 +393,7 @@ const App = (() => {
       items.push({ label: "ここで kilo", act: () => openKiloAt(target.path) });
       items.push({ label: "ここで freebuff", act: () => openFreebuffAt(target.path) });
       items.push({ label: "ここで agy", act: () => openAgyAt(target.path) });
+      items.push({ label: "ここで Copilot", act: () => openCopilotAt(target.path) });
       items.push({ label: "パスをコピー", act: () => copyPath(target.path) });
       items.push({ sep: true });
       items.push({ label: "アップロード", act: () => uploadFiles(target.path) });
@@ -887,8 +889,8 @@ const App = (() => {
           pane.lastDataAt = Date.now();
           pane.waitNotified = false;
           updateFreebuffBtn();
-          if (msg.cmd === "freebuff" || msg.cmd === "cline" || msg.cmd === "kilo" || msg.cmd === "agy") {
-            const label = msg.cmd === "freebuff" ? "freebuff" : msg.cmd === "cline" ? "cline" : msg.cmd === "kilo" ? "kilo" : "agy (Antigravity CLI)";
+          if (msg.cmd === "freebuff" || msg.cmd === "cline" || msg.cmd === "kilo" || msg.cmd === "agy" || msg.cmd === "copilot") {
+            const label = msg.cmd === "freebuff" ? "freebuff" : msg.cmd === "cline" ? "cline" : msg.cmd === "kilo" ? "kilo" : msg.cmd === "copilot" ? "GitHub Copilot CLI" : "agy (Antigravity CLI)";
             pane.term.reset();
             pane.term.write(
               msg.installing
@@ -1267,9 +1269,10 @@ const App = (() => {
     $("btn-opencode").classList.toggle("active", cmd === "opencode");
     $("btn-kilo").classList.toggle("active", cmd === "kilo");
     $("btn-ag").classList.toggle("active", cmd === "agy");
+    $("btn-copilot").classList.toggle("active", cmd === "copilot");
   }
 
-  // 「freebuff」/「cline」/「opencode」/「agy」起動処理（ツールバーおよび右クリックメニュー共通）
+  // 「freebuff」/「cline」/「opencode」/「agy」/「copilot」起動処理（ツールバーおよび右クリックメニュー共通）
   // ターミナルウィンドウが開いているときは分割して新しいペインで起動する。
   // 閉じているときは分割せず、最初のサブウィンドウで起動する。
   // relPath が指定された場合は作業ディレクトリ(cwd)を設定する。
@@ -1336,10 +1339,14 @@ const App = (() => {
     openToolInTerminal("agy");
   }
 
+  function openCopilotTerminal() {
+    openToolInTerminal("copilot");
+  }
+
   function toggleRootMode() {
     rootMode = !rootMode;
     $("btn-root").classList.toggle("active", rootMode);
-    toast(rootMode ? "Root モード ON: opencode/cline/freebuff/kilo/agy が root で実行されます" : "Root モード OFF");
+    toast(rootMode ? "Root モード ON: opencode/cline/freebuff/kilo/agy/copilot が root で実行されます" : "Root モード OFF");
   }
 
   let sshTempOn = false; // 「一時SSH」ボタンの状態（/api/ssh-temp と同期）
@@ -1727,7 +1734,7 @@ const App = (() => {
     }, 100);
   }
 
-  // 指定フォルダを cwd として CLI ツール（opencode / cline / freebuff / agy）を起動する（右クリックメニュー用）
+  // 指定フォルダを cwd として CLI ツール（opencode / cline / freebuff / agy / copilot）を起動する（右クリックメニュー用）
   function openToolAt(cmd, relPath) {
     openToolInTerminal(cmd, relPath);
   }
@@ -1748,6 +1755,10 @@ const App = (() => {
     openToolAt("agy", relPath);
   }
 
+  function openCopilotAt(relPath) {
+    openToolAt("copilot", relPath);
+  }
+
   function openKiloAt(relPath) {
     openToolAt("kilo", relPath);
   }
@@ -1759,7 +1770,7 @@ const App = (() => {
   // 出力がこの時間止まったら入力待ちとみなす
   const NOTIFY_IDLE_MS = 5000;
   // 終了（タスク完了）通知の対象 CLI
-  const NOTIFY_AI_CMDS = new Set(["freebuff", "cline", "opencode", "agy", "kilo"]);
+  const NOTIFY_AI_CMDS = new Set(["freebuff", "cline", "opencode", "agy", "kilo", "copilot"]);
   // 入力待ちっぽい出力かのざっくり判定
   const NOTIFY_WAIT_RE = /\[y\/n\]|\(y\/n\)|\[Y\/n\]|\(yes\/no\)|yes\/no|press (enter|any key)|press \[|choose (one|an option)|select (one|an option)|continue\?|proceed\?|are you sure|do you want|shall I|may I|waiting for|awaiting|needs your|require(s)? (your )?(input|approval|permission|confirmation)|permission|approval|confirm|login|sign[\s_\-]*in|承認|許可|確認が必要|続行しますか|実行しますか|よろしいですか|入力してください|選択してください|答えてください|教えてください|\?\s*$|？\s*$/i;
 
@@ -1922,7 +1933,7 @@ const App = (() => {
   function notifyPaneExit(pane, cmd, code) {
     if (pane && pane.waitNotified) pane.waitNotified = false;
     if (!notifyEnabled() || !NOTIFY_AI_CMDS.has(cmd)) return;
-    const name = cmd === "agy" ? "agy (Antigravity CLI)" : cmd;
+    const name = cmd === "agy" ? "agy (Antigravity CLI)" : cmd === "copilot" ? "GitHub Copilot CLI" : cmd;
     browserNotify(`${name} が終了しました`, code === 0 ? "タスク完了（終了コード 0）" : `終了コード: ${code}`);
   }
 
@@ -2780,6 +2791,7 @@ const App = (() => {
     $("btn-opencode").onclick = openOpencodeTerminal;
     $("btn-kilo").onclick = openKiloTerminal;
     $("btn-ag").onclick = openAgTerminal;
+    $("btn-copilot").onclick = openCopilotTerminal;
     $("btn-hermes").onclick = toggleHermesPanel;
     $("btn-root").onclick = toggleRootMode;
     $("btn-aisettings").onclick = toggleAiSettings;
