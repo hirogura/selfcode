@@ -69,6 +69,18 @@ const App = (() => {
     return EXT_LANG[ext] || "plaintext";
   }
 
+  // エクスプローラでクリックしたファイルが画像ならモーダルでプレビューする
+  const IMAGE_MIME = {
+    png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+    webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml", ico: "image/x-icon", avif: "image/avif",
+  };
+
+  function imageMimeOf(p) {
+    const base = String(p || "").split("/").pop() || "";
+    const ext = base.includes(".") ? base.split(".").pop().toLowerCase() : "";
+    return IMAGE_MIME[ext] || null;
+  }
+
   function toast(msg, isErr) {
     let t = $("toast");
     if (!t) {
@@ -118,6 +130,11 @@ const App = (() => {
 
   async function openFile(path) {
     if (!path) return;
+    const imageMime = imageMimeOf(path);
+    if (imageMime) {
+      await showImageModal(path, imageMime);
+      return;
+    }
     // エディタを隠しているときにファイルを開いたら、エディタを表示し直す
     if (els.editorHost.classList.contains("hidden")) setEditorPanelVisible(true);
     const existing = docs.get(path);
@@ -142,6 +159,58 @@ const App = (() => {
     addTab(path);
     activateTab(path);
     selectTreeNode(path);
+  }
+
+  let imageObjectUrl = null;
+  let imageLoadSeq = 0;
+
+  function closeImageModal() {
+    imageLoadSeq++;
+    const modal = $("image-modal");
+    if (modal) modal.classList.add("hidden");
+    const img = $("image-modal-img");
+    if (img) {
+      img.removeAttribute("src");
+      img.hidden = true;
+    }
+    const loading = $("image-modal-loading");
+    if (loading) loading.hidden = true;
+    if (imageObjectUrl) {
+      URL.revokeObjectURL(imageObjectUrl);
+      imageObjectUrl = null;
+    }
+  }
+
+  async function showImageModal(path, mime) {
+    const modal = $("image-modal");
+    if (!modal) return;
+    const img = $("image-modal-img");
+    const loading = $("image-modal-loading");
+    const title = $("image-modal-title");
+    const seq = ++imageLoadSeq;
+    if (title) title.textContent = path.split("/").pop() || path;
+    if (img) {
+      img.removeAttribute("src");
+      img.hidden = true;
+    }
+    if (loading) loading.hidden = false;
+    modal.classList.remove("hidden");
+    selectTreeNode(path);
+    try {
+      const buf = await API.readFileRaw(path);
+      if (seq !== imageLoadSeq) return; // 別の画像が開かれた／閉じられた場合は破棄
+      if (imageObjectUrl) URL.revokeObjectURL(imageObjectUrl);
+      imageObjectUrl = URL.createObjectURL(new Blob([buf], { type: mime }));
+      if (img) {
+        img.src = imageObjectUrl;
+        img.hidden = false;
+      }
+      if (loading) loading.hidden = true;
+    } catch (e) {
+      if (seq !== imageLoadSeq) return;
+      closeImageModal();
+      toast("画像を読み込めませんでした: " + e.message, true);
+    }
   }
 
   async function loadIntoModel(path, markClean) {
@@ -2929,6 +2998,11 @@ const App = (() => {
     $("btn-new-file").onclick = () => createFile(selectedDir);
     $("btn-new-folder").onclick = () => createFolder(selectedDir);
     $("btn-explorer").onclick = toggleExplorer;
+    const imgModal = $("image-modal");
+    if (imgModal) {
+      $("image-modal-close").onclick = closeImageModal;
+      imgModal.addEventListener("click", (e) => { if (e.target === imgModal) closeImageModal(); });
+    }
     $("btn-editor").onclick = toggleEditorPanel;
     $("btn-terminal").onclick = toggleTerminal;
     $("btn-freebuff").onclick = openFreebuffTerminal;
@@ -3099,6 +3173,14 @@ const App = (() => {
     });
 
     document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        const imgModal = $("image-modal");
+        if (imgModal && !imgModal.classList.contains("hidden")) {
+          e.preventDefault();
+          closeImageModal();
+          return;
+        }
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "j") {
         e.preventDefault();
         toggleTerminal();

@@ -13,7 +13,7 @@
   <header id="topbar">
     <div class="brand">
       <span class="logo"><svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><text x="36" y="70" font-size="52" text-anchor="middle" fill="#fff" font-family="monospace" font-weight="bold">S</text><polyline points="58,40 80,54 58,68" fill="none" stroke="#d1d5db" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-      <span class="title-wrap"><span class="title">selfcode</span><span class="version">v.4.3.1</span></span>
+      <span class="title-wrap"><span class="title">selfcode</span><span class="version">v.4.4.0</span></span>
     </div>
     <button id="btn-explorer" class="btn toggle active" title="エクスプローラの表示切替"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>
     <button id="btn-refresh" class="btn" title="リフレッシュ"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
@@ -383,6 +383,20 @@
         <textarea id="memo-input" placeholder="メモを入力…（Ctrl+S で保存）"></textarea>
       </div>
     </aside>
+  </div>
+</div>
+
+<!-- エクスプローラで画像ファイルを開いたときのプレビューモーダル -->
+<div id="image-modal" class="modal hidden">
+  <div class="modal-box image-modal-box">
+    <div class="modal-head">
+      <span id="image-modal-title">画像</span>
+      <button id="image-modal-close" class="btn small" title="閉じる (Esc)">×</button>
+    </div>
+    <div class="image-modal-body">
+      <div id="image-modal-loading" class="image-modal-loading">読み込み中…</div>
+      <img id="image-modal-img" alt="" hidden>
+    </div>
   </div>
 </div>
 

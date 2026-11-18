@@ -340,6 +340,24 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
   color: var(--fg-dim);
   border-bottom: 1px solid var(--border);
 }
+
+/* 画像プレビュー用モーダル */
+.image-modal-box { width: min(92vw, 1100px); min-width: 0; max-height: 92vh; }
+#image-modal-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.image-modal-body {
+  flex: 1;
+  min-height: 120px;
+  overflow: auto;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+.image-modal-body img { display: block; max-width: 100%; max-height: calc(92vh - 60px); object-fit: contain; }
+.image-modal-body img[hidden] { display: none; }
+.image-modal-loading { color: var(--fg-dim); font-size: 12px; }
+
 .container-list { padding: 6px; overflow-y: auto; }
 .container-item {
   display: flex;

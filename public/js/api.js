@@ -49,6 +49,19 @@ const API = (() => {
     async readFile(path) {
       return this.get("/api/file?path=" + encodeURIComponent(path));
     },
+    // 画像プレビュー用: /api/file のダウンロード応答を生バイト (ArrayBuffer) で取得する
+    async readFileRaw(path) {
+      const res = await fetch("/api/file?path=" + encodeURIComponent(path) + "&download=1");
+      if (!res.ok) {
+        let msg = `${res.status} ${res.statusText}`;
+        try {
+          const d = await res.json();
+          if (d && d.error) msg = d.error;
+        } catch {}
+        throw new Error(msg);
+      }
+      return res.arrayBuffer();
+    },
     async writeFile(path, content, base64) {
       return this.put("/api/file", { path, content, base64 });
     },

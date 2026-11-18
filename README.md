@@ -1,9 +1,10 @@
 # selfcode
 
-code-server のようにブラウザから使えて、opencode / freebuff / cline / kilo / Antigravity (agy) / GitHub Copilot CLI / Hermes などの AI エージェント連携や GitHub 連携がある、セルフホスト型コードエディタです。現在のバージョンは **v4.3.1** です。
+code-server のようにブラウザから使えて、opencode / freebuff / cline / kilo / Antigravity (agy) / GitHub Copilot CLI / Hermes などの AI エージェント連携や GitHub 連携がある、セルフホスト型コードエディタです。現在のバージョンは **v4.4.0** です。
 
 - Monaco エディタ（VS Code と同じエディタエンジン）
 - ファイルツリー / タブ編集 / 保存（Ctrl+S） / ファイル・フォルダのダウンロード（ホストは ZIP、コンテナ内は tar.gz）
+- 画像ファイル（PNG / JPEG / GIF / WebP / BMP / SVG / ICO / AVIF）をエクスプローラでクリックするとモーダルでプレビュー（背景クリックまたは Esc で閉じる。コンテナ内の画像も表示可）
 - xterm.js ターミナル（**分割**・**ユーザー切替**・**リフレッシュ**対応）
 - **opencode / freebuff / cline / kilo / agy (Antigravity CLI) / Copilot (GitHub Copilot CLI)** ボタンでターミナルを分割して CLI を起動（未インストールなら確認して自動インストール）。**root モード**でこれらを root 権限で起動することも可能
 - **Hermes Agent パネル**：Hermes CLI の導入・Gemini API キー（GOOGLE_API_KEY）設定・起動時モデルの指定（候補から選択／直接入力、入力内容は即時保存）、およびブラウザ操作用 **CDP ブラウザ**（`http://localhost:9222`）の起動・停止。起動モードは**ヘッドレス**（Xvfb 上の専用ブラウザでデスクトップに影響しない）と**デスクトップ**（KDE セッションにウィンドウを表示。ログイン中の KDE セッションが必要）から選べます
