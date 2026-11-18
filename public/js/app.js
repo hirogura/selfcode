@@ -1282,6 +1282,7 @@ const App = (() => {
   const AI_SETTINGS_KILO_AUTO_KEY = "selfcode.kiloAutoApprove";
   const AI_SETTINGS_FREEBUFF_AUTO_KEY = "selfcode.freebuffAutoApprove";
   const AI_SETTINGS_AGY_AUTO_KEY = "selfcode.agyAutoApprove";
+  const AI_SETTINGS_COPILOT_AUTO_KEY = "selfcode.copilotAutoApprove";
 
   function toolLaunchArgs(cmd) {
     const args = [];
@@ -1294,6 +1295,8 @@ const App = (() => {
       args.push("--trust-agents");
     } else if (cmd === "agy" && $("ais-agy-auto") && $("ais-agy-auto").checked) {
       args.push("--dangerously-skip-permissions");
+    } else if (cmd === "copilot" && $("ais-copilot-auto") && $("ais-copilot-auto").checked) {
+      args.push("--allow-all");
     }
     return args.length ? args : undefined;
   }
@@ -2869,6 +2872,7 @@ const App = (() => {
     bindAiSettingCheck("ais-kilo-auto", AI_SETTINGS_KILO_AUTO_KEY);
     bindAiSettingCheck("ais-freebuff-auto", AI_SETTINGS_FREEBUFF_AUTO_KEY);
     bindAiSettingCheck("ais-agy-auto", AI_SETTINGS_AGY_AUTO_KEY);
+    bindAiSettingCheck("ais-copilot-auto", AI_SETTINGS_COPILOT_AUTO_KEY);
     // 通知表示チェックボックス: ON にしたときに通知の許可を求める
     bindAiSettingCheck("ais-notify", NOTIFY_IDLE_KEY);
     const notifyCheck = $("ais-notify");
