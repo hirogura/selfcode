@@ -205,7 +205,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "4.3.0",
+    version: "4.3.1",
     bootId: BOOT_ID,
     workspace: ROOT,
     distro: DISTRO,
@@ -1343,6 +1343,13 @@ app.post("/api/headless-browser/font", (req, res) => {
     return res.status(409).json({ error: "日本語フォントのインストールが進行中です" });
   }
   startJapaneseFontInstall();
+  res.json({ ok: true });
+});
+
+// AI設定パネルの「ログ」カードに表示するインストールログをクリアする
+app.post("/api/headless-browser/log/clear", (req, res) => {
+  headlessBrowserInstall.log = [];
+  japaneseFontInstall.log = [];
   res.json({ ok: true });
 });
 

@@ -1610,8 +1610,21 @@ const App = (() => {
       refresh: $("btn-headless-browser-refresh"),
       font: $("btn-headless-browser-font"),
       status: $("ais-headless-browser-status"),
-      log: $("ais-headless-browser-log"),
+      log: $("ais-log"),
+      logEmpty: $("ais-log-empty"),
     };
+  }
+
+  // AI設定パネル最下部の「ログ」カードを描画する（ヘッドレスブラウザ／日本語フォントのインストールログ）
+  function renderAiLog(text) {
+    const btns = headlessBrowserButtons();
+    const log = text || "";
+    if (btns.log) {
+      btns.log.hidden = !log;
+      btns.log.textContent = log;
+      btns.log.scrollTop = btns.log.scrollHeight;
+    }
+    if (btns.logEmpty) btns.logEmpty.hidden = !!log;
   }
 
   async function loadHeadlessBrowserStatus(showToast) {
@@ -1656,13 +1669,8 @@ const App = (() => {
     else if (fontInstall.ok === false) bits.push("日本語フォント: インストール失敗");
     btns.status.textContent = bits.join("\n");
 
-    if (btns.log) {
-      const logs = [(st.install && st.install.log) || "", fontInstall.log || ""].filter(Boolean);
-      const log = logs.join("\n");
-      btns.log.hidden = !log;
-      btns.log.textContent = log;
-      btns.log.scrollTop = btns.log.scrollHeight;
-    }
+    const logs = [(st.install && st.install.log) || "", fontInstall.log || ""].filter(Boolean);
+    renderAiLog(logs.join("\n"));
     // 実行中だけ無効化（ブラウザが導入済みでもスクリプトの再配置に使えるようにする）
     if (btns.install) btns.install.disabled = !!(st.install && st.install.running);
     if (btns.font) btns.font.disabled = !!fontInstall.running;
@@ -1681,13 +1689,13 @@ const App = (() => {
       "・Chromium 系ブラウザ / Xvfb / 依存ライブラリを導入\n" +
       "・~/.hermes/ に CDP ブラウザの起動・停止スクリプトを配置\n" +
       "・Hermes CLI 自体はインストールしません\n" +
-      "\n完了するとこのカードの状態とログに反映されます。"
+      "\n完了すると状態はこのカード、進捗は「ログ」カードに反映されます。"
     )) return;
     try {
       await API.post("/api/headless-browser/install", {}, undefined, 8000);
       toast("ヘッドレスブラウザのインストールを開始しました");
+      renderAiLog("");
       const btns = headlessBrowserButtons();
-      if (btns.log) btns.log.hidden = false;
       if (btns.status) btns.status.textContent = "インストール中…";
       await loadHeadlessBrowserStatus();
     } catch (e) {
@@ -1702,18 +1710,34 @@ const App = (() => {
     if (!confirm(
       `${inContainer ? `コンテナ「${st.target.name}」内に ` : ""}日本語フォント (fonts-noto-cjk) をインストールしますか？\n\n` +
       "・ヘッドレスブラウザで日本語を表示できるようにします\n" +
-      "\n完了するとこのカードの状態とログに反映されます。"
+      "\n完了すると状態はこのカード、進捗は「ログ」カードに反映されます。"
     )) return;
     try {
       await API.post("/api/headless-browser/font", {}, undefined, 8000);
       toast("日本語フォントのインストールを開始しました");
+      renderAiLog("");
       const btns = headlessBrowserButtons();
-      if (btns.log) btns.log.hidden = false;
       if (btns.status) btns.status.textContent = "日本語フォントをインストール中…";
       await loadHeadlessBrowserStatus();
     } catch (e) {
       toast(e.message, true);
       loadHeadlessBrowserStatus();
+    }
+  }
+
+  // 「ログ」カードのクリア: サーバー側のログバッファも消す（ポーリングで復活しないように）
+  async function clearAiLog() {
+    try {
+      await API.post("/api/headless-browser/log/clear", {}, undefined, 8000);
+      renderAiLog("");
+      const st = headlessBrowserStatusCache;
+      if (st) {
+        if (st.install) st.install.log = "";
+        if (st.japaneseFont && st.japaneseFont.install) st.japaneseFont.install.log = "";
+      }
+      toast("ログをクリアしました");
+    } catch (e) {
+      toast(e.message, true);
     }
   }
 
@@ -2972,6 +2996,8 @@ const App = (() => {
     if (hbBtns.refresh) hbBtns.refresh.onclick = () => loadHeadlessBrowserStatus(true);
     if (hbBtns.install) hbBtns.install.onclick = installHeadlessBrowser;
     if (hbBtns.font) hbBtns.font.onclick = installJapaneseFont;
+    const logClearBtn = $("btn-ai-log-clear");
+    if (logClearBtn) logClearBtn.onclick = clearAiLog;
     loadHeadlessBrowserStatus();
     // AI設定パネルの表示状態を復元
     try { if (localStorage.getItem(AI_SETTINGS_KEY) === "1") showAiSettings(); } catch {}
