@@ -1608,6 +1608,7 @@ const App = (() => {
     return {
       install: $("btn-headless-browser-install"),
       refresh: $("btn-headless-browser-refresh"),
+      font: $("btn-headless-browser-font"),
       status: $("ais-headless-browser-status"),
       log: $("ais-headless-browser-log"),
     };
@@ -1647,19 +1648,27 @@ const App = (() => {
     if (st.install && st.install.running) bits.push("インストール: 実行中…");
     else if (st.install && st.install.ok === true) bits.push("インストール: 完了");
     else if (st.install && st.install.ok === false) bits.push("インストール: 失敗");
+    const font = st.japaneseFont || {};
+    const fontInstall = font.install || {};
+    bits.push(font.installed ? "日本語フォント: インストール済み" : "日本語フォント: 未インストール");
+    if (fontInstall.running) bits.push("日本語フォント: インストール中…");
+    else if (fontInstall.ok === true) bits.push("日本語フォント: インストール完了");
+    else if (fontInstall.ok === false) bits.push("日本語フォント: インストール失敗");
     btns.status.textContent = bits.join("\n");
 
     if (btns.log) {
-      const log = (st.install && st.install.log) || "";
+      const logs = [(st.install && st.install.log) || "", fontInstall.log || ""].filter(Boolean);
+      const log = logs.join("\n");
       btns.log.hidden = !log;
       btns.log.textContent = log;
       btns.log.scrollTop = btns.log.scrollHeight;
     }
     // 実行中だけ無効化（ブラウザが導入済みでもスクリプトの再配置に使えるようにする）
     if (btns.install) btns.install.disabled = !!(st.install && st.install.running);
+    if (btns.font) btns.font.disabled = !!fontInstall.running;
     clearInterval(headlessBrowserPollTimer);
     headlessBrowserPollTimer = null;
-    if (st.install && st.install.running && aiSettingsVisible()) {
+    if (((st.install && st.install.running) || fontInstall.running) && aiSettingsVisible()) {
       headlessBrowserPollTimer = setInterval(loadHeadlessBrowserStatus, 2000);
     }
   }
@@ -1680,6 +1689,27 @@ const App = (() => {
       const btns = headlessBrowserButtons();
       if (btns.log) btns.log.hidden = false;
       if (btns.status) btns.status.textContent = "インストール中…";
+      await loadHeadlessBrowserStatus();
+    } catch (e) {
+      toast(e.message, true);
+      loadHeadlessBrowserStatus();
+    }
+  }
+
+  async function installJapaneseFont() {
+    const st = headlessBrowserStatusCache;
+    const inContainer = !!(st && st.target);
+    if (!confirm(
+      `${inContainer ? `コンテナ「${st.target.name}」内に ` : ""}日本語フォント (fonts-noto-cjk) をインストールしますか？\n\n` +
+      "・ヘッドレスブラウザで日本語を表示できるようにします\n" +
+      "\n完了するとこのカードの状態とログに反映されます。"
+    )) return;
+    try {
+      await API.post("/api/headless-browser/font", {}, undefined, 8000);
+      toast("日本語フォントのインストールを開始しました");
+      const btns = headlessBrowserButtons();
+      if (btns.log) btns.log.hidden = false;
+      if (btns.status) btns.status.textContent = "日本語フォントをインストール中…";
       await loadHeadlessBrowserStatus();
     } catch (e) {
       toast(e.message, true);
@@ -2941,6 +2971,7 @@ const App = (() => {
     const hbBtns = headlessBrowserButtons();
     if (hbBtns.refresh) hbBtns.refresh.onclick = () => loadHeadlessBrowserStatus(true);
     if (hbBtns.install) hbBtns.install.onclick = installHeadlessBrowser;
+    if (hbBtns.font) hbBtns.font.onclick = installJapaneseFont;
     loadHeadlessBrowserStatus();
     // AI設定パネルの表示状態を復元
     try { if (localStorage.getItem(AI_SETTINGS_KEY) === "1") showAiSettings(); } catch {}

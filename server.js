@@ -205,7 +205,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "4.2.0",
+    version: "4.3.0",
     bootId: BOOT_ID,
     workspace: ROOT,
     distro: DISTRO,
@@ -644,6 +644,9 @@ const HERMES_INSTALL_LOG_MAX = 200;
 // ヘッドレスブラウザ単体のインストール状態（Hermes CLI 本体は導入しない）
 const headlessBrowserInstall = { running: false, startedAt: null, finishedAt: null, ok: null, log: [], child: null, target: null };
 const HEADLESS_BROWSER_INSTALL_LOG_MAX = 200;
+// 日本語フォント（fonts-noto-cjk）のインストール状態（ヘッドレスブラウザで日本語を表示するため）
+const japaneseFontInstall = { running: false, startedAt: null, finishedAt: null, ok: null, log: [], child: null, target: null };
+const JAPANESE_FONT_INSTALL_LOG_MAX = 200;
 
 async function loadHermesConfig() {
   if (hermesConfigCache) return hermesConfigCache;
@@ -927,12 +930,89 @@ function startHeadlessBrowserInstall() {
   });
 }
 
+// 日本語フォント（fonts-noto-cjk）を導入する。ヘッドレスブラウザで日本語が文字化けせず表示できるようにする。
+// ディストリビューションに応じて相当パッケージを入れる（Debian 系は fonts-noto-cjk）。
+function japaneseFontInstallScriptBody() {
+  return [
+    "set -e",
+    "export PATH=\"$HOME/.local/bin:$PATH\"",
+    "echo '[selfcode] 日本語フォント (fonts-noto-cjk) のインストールを開始します…'",
+    "if command -v apt-get >/dev/null 2>&1; then",
+    "  (sudo -n apt-get update || apt-get update || true)",
+    "  sudo -n apt-get install -y fonts-noto-cjk || apt-get install -y fonts-noto-cjk",
+    "elif command -v pacman >/dev/null 2>&1; then",
+    "  sudo -n pacman -Sy --noconfirm noto-fonts-cjk || pacman -Sy --noconfirm noto-fonts-cjk",
+    "elif command -v apk >/dev/null 2>&1; then",
+    "  apk add --no-cache font-noto-cjk",
+    "elif command -v dnf >/dev/null 2>&1; then",
+    "  sudo -n dnf install -y google-noto-sans-cjk-fonts || dnf install -y google-noto-sans-cjk-fonts",
+    "elif command -v yum >/dev/null 2>&1; then",
+    "  sudo -n yum install -y google-noto-sans-cjk-fonts || yum install -y google-noto-sans-cjk-fonts",
+    "else",
+    "  echo '[selfcode] 対応するパッケージマネージャーが見つかりません' >&2",
+    "  exit 1",
+    "fi",
+    "echo '[selfcode] 日本語フォントのインストールが完了しました'",
+  ].join("\n");
+}
+
+function japaneseFontLogPush(chunk) {
+  pushInstallLog(japaneseFontInstall, chunk, JAPANESE_FONT_INSTALL_LOG_MAX);
+}
+
+function finishJapaneseFontInstall(ok) {
+  japaneseFontInstall.running = false;
+  japaneseFontInstall.ok = ok;
+  japaneseFontInstall.finishedAt = Date.now();
+  japaneseFontInstall.child = null;
+  console.log(`[selfcode] japanese font install ${ok ? "finished" : "failed"}`);
+}
+
+function startJapaneseFontInstall() {
+  if (japaneseFontInstall.running) return;
+  japaneseFontInstall.running = true;
+  japaneseFontInstall.startedAt = Date.now();
+  japaneseFontInstall.finishedAt = null;
+  japaneseFontInstall.ok = null;
+  japaneseFontInstall.log = [];
+  japaneseFontInstall.target = containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null;
+  console.log("[selfcode] japanese font install started" + (japaneseFontInstall.target ? ` (container: ${japaneseFontInstall.target.name})` : ""));
+  let child;
+  if (japaneseFontInstall.target) {
+    child = spawn(containerBin(japaneseFontInstall.target.runtime), containerExecArgs(japaneseFontInstall.target.runtime, japaneseFontInstall.target.name, false).concat(["bash", "-lc", japaneseFontInstallScriptBody()]), {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } else {
+    child = spawn("bash", ["-lc", japaneseFontInstallScriptBody()], {
+      env: { ...process.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  }
+  japaneseFontInstall.child = child;
+  child.stdout.on("data", (d) => japaneseFontLogPush(d));
+  child.stderr.on("data", (d) => japaneseFontLogPush(d));
+  child.on("error", (e) => {
+    japaneseFontLogPush("[selfcode] インストールの起動に失敗しました: " + e.message);
+    finishJapaneseFontInstall(false);
+  });
+  child.on("close", (code) => {
+    if (code === 0) {
+      japaneseFontLogPush("[selfcode] インストールが完了しました。ヘッドレスブラウザで日本語が表示できるようになります。");
+      finishJapaneseFontInstall(true);
+    } else {
+      japaneseFontLogPush(`[selfcode] インストールに失敗しました (exit ${code})`);
+      finishJapaneseFontInstall(false);
+    }
+  });
+}
+
 // ブラウザバイナリ／Xvfb／CDP の状態を返す（選択中コンテナがあれば対象はコンテナ内）。
 async function headlessBrowserStatus() {
   const target = containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null;
   let binPath = null;
   let version = null;
   let xvfb = false;
+  let japaneseFont = false;
   try {
     const script = [
       'export PATH="$HOME/.local/bin:$PATH"',
@@ -940,6 +1020,7 @@ async function headlessBrowserStatus() {
       'echo "bin:$B"',
       'if [ -n "$B" ]; then echo "ver:$("$B" --version 2>/dev/null | head -n 1)"; fi',
       'if command -v Xvfb >/dev/null 2>&1; then echo "xvfb:1"; else echo "xvfb:0"; fi',
+      'if command -v fc-list >/dev/null 2>&1 && fc-list 2>/dev/null | grep -qi "noto.*cjk"; then echo "font:1"; else echo "font:0"; fi',
     ].join("; ");
     let raw = "";
     if (containerCtx) {
@@ -953,6 +1034,7 @@ async function headlessBrowserStatus() {
       if (line.startsWith("bin:")) binPath = line.slice(4) || null;
       else if (line.startsWith("ver:")) version = line.slice(4) || null;
       else if (line === "xvfb:1") xvfb = true;
+      else if (line === "font:1") japaneseFont = true;
     }
   } catch {}
   return {
@@ -968,6 +1050,17 @@ async function headlessBrowserStatus() {
       startedAt: headlessBrowserInstall.startedAt,
       finishedAt: headlessBrowserInstall.finishedAt,
       log: headlessBrowserInstall.log.slice(-40).join("\n"),
+    },
+    japaneseFont: {
+      installed: japaneseFont,
+      install: {
+        running: japaneseFontInstall.running,
+        ok: japaneseFontInstall.ok,
+        target: japaneseFontInstall.target,
+        startedAt: japaneseFontInstall.startedAt,
+        finishedAt: japaneseFontInstall.finishedAt,
+        log: japaneseFontInstall.log.slice(-40).join("\n"),
+      },
     },
     cdp: await hermesBrowserStatus(),
   };
@@ -1241,6 +1334,15 @@ app.post("/api/headless-browser/install", (req, res) => {
     return res.status(409).json({ error: "ヘッドレスブラウザのインストールが進行中です" });
   }
   startHeadlessBrowserInstall();
+  res.json({ ok: true });
+});
+
+// ヘッドレスブラウザで日本語を表示するためのフォント（fonts-noto-cjk）を導入する
+app.post("/api/headless-browser/font", (req, res) => {
+  if (japaneseFontInstall.running) {
+    return res.status(409).json({ error: "日本語フォントのインストールが進行中です" });
+  }
+  startJapaneseFontInstall();
   res.json({ ok: true });
 });
 
