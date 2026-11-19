@@ -1193,48 +1193,9 @@ const App = (() => {
     window.addEventListener("pointerup", onUp);
   }
 
-  function initDivider(div, wrapEl, dir) {
-    div.style.cursor = dir === "row" ? "col-resize" : "row-resize";
-    div.addEventListener("pointerdown", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const kids = Array.from(wrapEl.children).filter((c) => c !== div);
-      if (kids.length !== 2) return;
-      const [a, b] = kids;
-      const ra = a.getBoundingClientRect();
-      const rb = b.getBoundingClientRect();
-      const start = dir === "row" ? e.clientX : e.clientY;
-      const sa = dir === "row" ? ra.width : ra.height;
-      const sb = dir === "row" ? rb.width : rb.height;
-      div.classList.add("active");
-      const onMove = (ev) => {
-        const d = (dir === "row" ? ev.clientX : ev.clientY) - start;
-        if (dir === "col") {
-          const na = clamp(sa + d, 40, sa + sb - 40);
-          a.style.flex = `0 0 ${na}px`;
-          b.style.flex = "1 1 0";
-        } else if (d >= 0) {
-          // 右へドラッグ: 右のペイン（2枚目など）を広げ、後続を右へ押し出す
-          const nb = clamp(sb + d, TERM_PANE_W_MIN, TERM_PANE_W_MAX);
-          a.style.flex = `0 0 ${sa}px`; a.style.width = sa + "px";
-          b.style.flex = `0 0 ${nb}px`; b.style.width = nb + "px";
-        } else {
-          // 左へドラッグ: 左のペインを広げる
-          const na = clamp(sa - d, TERM_PANE_W_MIN, TERM_PANE_W_MAX);
-          a.style.flex = `0 0 ${na}px`; a.style.width = na + "px";
-          b.style.flex = `0 0 ${sb}px`; b.style.width = sb + "px";
-        }
-        fitAll();
-      };
-      const onUp = () => {
-        div.classList.remove("active");
-        window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onUp);
-        fitAll();
-      };
-      window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", onUp);
-    });
+  // ペイン間の線は見た目だけの区切り。幅調整は各ペイン右端のハンドルで行うためドラッグは受け付けない
+  function initDivider(div) {
+    div.style.pointerEvents = "none";
   }
 
   function setPaneCwd(pane, rel) {
