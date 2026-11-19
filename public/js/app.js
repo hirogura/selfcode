@@ -2332,7 +2332,7 @@ const App = (() => {
   const TERM_PANE_W_KEY = "selfcode.termPaneWidth";
   const TERM_PANE_W_MIN = 320;
   const TERM_PANE_W_MAX = 2400;
-  let currentTermPaneW = 520;
+  let currentTermPaneW = 1040;
   // 説明(空状態)を表示できる最小のエディタ領域の高さ
   const EMPTY_MIN_H = 200;
   function applyEditorWidth(px) {
