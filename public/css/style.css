@@ -820,7 +820,7 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
 }
 .gh-branch-new-input:focus { border-color: var(--accent-2); }
 
-/* ---- AI設定パネル（GITHUB パネルの左に表示。各 AI 関連設定はここに置く） ---- */
+/* ---- AI設定パネル（Hermes パネルの右、GITHUB パネルの左に表示。各 AI 関連設定はここに置く） ---- */
 .aisettings {
   width: 320px;
   min-width: 260px;

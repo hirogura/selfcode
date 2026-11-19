@@ -13,7 +13,7 @@
   <header id="topbar">
     <div class="brand">
       <span class="logo"><svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><text x="36" y="70" font-size="52" text-anchor="middle" fill="#fff" font-family="monospace" font-weight="bold">S</text><polyline points="58,40 80,54 58,68" fill="none" stroke="#d1d5db" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-      <span class="title-wrap"><span class="title">selfcode</span><span class="version">v.4.5.0</span></span>
+      <span class="title-wrap"><span class="title">selfcode</span><span class="version">v.4.5.1</span></span>
     </div>
     <button id="btn-explorer" class="btn toggle active" title="エクスプローラの表示切替"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>
     <button id="btn-refresh" class="btn" title="リフレッシュ"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
@@ -84,6 +84,85 @@
       <div id="terminal-workspace"></div>
     </div>
 
+
+    <div class="divider-v hidden" id="divider-hermes" title="ドラッグで幅を調整"></div>
+    <aside id="hermes" class="hermes hidden">
+      <div class="hermes-head">
+        <span>Hermes <span class="hint">Agent 導入・設定</span></span>
+        <div class="hermes-head-actions">
+          <button id="btn-hermes-close" class="btn small" title="閉じる">×</button>
+        </div>
+      </div>
+      <div class="hermes-body">
+        <div class="gh-section">
+          <div class="gh-sec-head"><span>状態</span></div>
+          <div class="gh-status" id="hermes-status">読み込み中…</div>
+          <div class="gh-actions">
+            <button id="btn-hermes-install" class="btn small primary" title="Hermes Agent とヘッドレスブラウザ環境をインストールする">インストール</button>
+            <button id="btn-hermes-refresh" class="btn small" title="状態を再取得する">状態更新</button>
+          </div>
+        </div>
+        <div class="gh-section">
+          <div class="gh-sec-head"><span>Gemini APIキー</span></div>
+          <div class="gh-field">
+            <label for="hermes-gemini-key">GOOGLE_API_KEY（Gemini 無料枠など）</label>
+            <div class="gh-token-row">
+              <input id="hermes-gemini-key" type="password" placeholder="AIza…" autocomplete="off">
+              <button id="hermes-key-toggle" class="btn small" title="表示/非表示">👁</button>
+            </div>
+          </div>
+          <div class="gh-actions">
+            <button id="hermes-key-save" class="btn small primary">保存</button>
+            <button id="hermes-key-clear" class="btn small danger">クリア</button>
+          </div>
+          <div id="hermes-key-status" class="gh-status"></div>
+        </div>
+        <div class="gh-section">
+          <div class="gh-sec-head"><span>操作</span></div>
+          <div class="gh-field">
+            <label for="hermes-model">起動時のモデル（--model に渡されます。空欄なら既定）</label>
+            <input id="hermes-model" type="text" list="hermes-model-options" placeholder="候補から選択、または直接入力" autocomplete="off" spellcheck="false">
+            <datalist id="hermes-model-options">
+              <option value="gemini/gemini-2.5-flash"></option>
+              <option value="gemini/gemini-2.5-flash-lite"></option>
+              <option value="gemini/gemini-3.5-flash-lite"></option>
+              <option value="gemini/gemini-2.5-pro"></option>
+              <option value="gemini/gemini-2.0-flash"></option>
+              <option value="openrouter/google/gemini-2.5-flash"></option>
+              <option value="anthropic/claude-sonnet-4.6"></option>
+              <option value="openai/gpt-5.5"></option>
+            </datalist>
+          </div>
+          <div class="gh-actions">
+            <button id="btn-hermes-open" class="btn small" title="ターミナルで hermes を起動する">ターミナルでHermesを起動</button>
+          </div>
+          <div class="gh-status" style="white-space:normal">Hermes はCLIエージェントです。導入・APIキー設定後はターミナルで <code>hermes</code> を実行して対話・作業できます。ブラウザ操作用の CDP ブラウザは下のセクションから起動します。</div>
+        </div>
+        <div class="gh-section">
+          <div class="gh-sec-head"><span>ブラウザ (CDP)</span></div>
+          <div class="gh-field">
+            <label>起動モード</label>
+            <div class="gh-prof-tabs" id="hermes-browser-modes">
+              <button type="button" class="gh-prof-tab active" data-mode="headless">ヘッドレス</button>
+              <button type="button" class="gh-prof-tab" data-mode="desktop">デスクトップ</button>
+            </div>
+          </div>
+          <div class="gh-status" id="hermes-browser-status">読み込み中…</div>
+          <div class="gh-actions">
+            <button id="btn-hermes-browser-start" class="btn small primary" title="選択したモードで CDP ブラウザを起動する">CDPブラウザ起動</button>
+            <button id="btn-hermes-browser-stop" class="btn small danger" title="Hermes 用の CDP ブラウザを停止する">停止</button>
+          </div>
+          <div class="gh-status" style="white-space:normal">
+            <code>http://localhost:9222</code> で待ち受けます。<b>ヘッドレス</b>は Xvfb 上の専用ブラウザで KDE セッションに影響しません。<b>デスクトップ</b>は KDE にウィンドウを表示します。開いているブラウザに CDP は後付けできないため、専用プロファイルで別起動します。
+          </div>
+        </div>
+        <div class="gh-section">
+          <div class="gh-sec-head"><span>ログ</span></div>
+          <pre id="hermes-log" class="beacon-log" hidden></pre>
+          <div id="hermes-log-empty" class="gh-status">インストール実行時にログを表示します</div>
+        </div>
+      </div>
+    </aside>
 
     <div class="divider-v hidden" id="divider-aisettings" title="ドラッグで幅を調整"></div>
     <aside id="aisettings" class="aisettings hidden">
@@ -171,85 +250,6 @@
           </div>
           <div class="gh-status" id="ais-log-empty">ログはありません</div>
           <pre id="ais-log" class="beacon-log" hidden></pre>
-        </div>
-      </div>
-    </aside>
-
-    <div class="divider-v hidden" id="divider-hermes" title="ドラッグで幅を調整"></div>
-    <aside id="hermes" class="hermes hidden">
-      <div class="hermes-head">
-        <span>Hermes <span class="hint">Agent 導入・設定</span></span>
-        <div class="hermes-head-actions">
-          <button id="btn-hermes-close" class="btn small" title="閉じる">×</button>
-        </div>
-      </div>
-      <div class="hermes-body">
-        <div class="gh-section">
-          <div class="gh-sec-head"><span>状態</span></div>
-          <div class="gh-status" id="hermes-status">読み込み中…</div>
-          <div class="gh-actions">
-            <button id="btn-hermes-install" class="btn small primary" title="Hermes Agent とヘッドレスブラウザ環境をインストールする">インストール</button>
-            <button id="btn-hermes-refresh" class="btn small" title="状態を再取得する">状態更新</button>
-          </div>
-        </div>
-        <div class="gh-section">
-          <div class="gh-sec-head"><span>Gemini APIキー</span></div>
-          <div class="gh-field">
-            <label for="hermes-gemini-key">GOOGLE_API_KEY（Gemini 無料枠など）</label>
-            <div class="gh-token-row">
-              <input id="hermes-gemini-key" type="password" placeholder="AIza…" autocomplete="off">
-              <button id="hermes-key-toggle" class="btn small" title="表示/非表示">👁</button>
-            </div>
-          </div>
-          <div class="gh-actions">
-            <button id="hermes-key-save" class="btn small primary">保存</button>
-            <button id="hermes-key-clear" class="btn small danger">クリア</button>
-          </div>
-          <div id="hermes-key-status" class="gh-status"></div>
-        </div>
-        <div class="gh-section">
-          <div class="gh-sec-head"><span>操作</span></div>
-          <div class="gh-field">
-            <label for="hermes-model">起動時のモデル（--model に渡されます。空欄なら既定）</label>
-            <input id="hermes-model" type="text" list="hermes-model-options" placeholder="候補から選択、または直接入力" autocomplete="off" spellcheck="false">
-            <datalist id="hermes-model-options">
-              <option value="gemini/gemini-2.5-flash"></option>
-              <option value="gemini/gemini-2.5-flash-lite"></option>
-              <option value="gemini/gemini-3.5-flash-lite"></option>
-              <option value="gemini/gemini-2.5-pro"></option>
-              <option value="gemini/gemini-2.0-flash"></option>
-              <option value="openrouter/google/gemini-2.5-flash"></option>
-              <option value="anthropic/claude-sonnet-4.6"></option>
-              <option value="openai/gpt-5.5"></option>
-            </datalist>
-          </div>
-          <div class="gh-actions">
-            <button id="btn-hermes-open" class="btn small" title="ターミナルで hermes を起動する">ターミナルでHermesを起動</button>
-          </div>
-          <div class="gh-status" style="white-space:normal">Hermes はCLIエージェントです。導入・APIキー設定後はターミナルで <code>hermes</code> を実行して対話・作業できます。ブラウザ操作用の CDP ブラウザは下のセクションから起動します。</div>
-        </div>
-        <div class="gh-section">
-          <div class="gh-sec-head"><span>ブラウザ (CDP)</span></div>
-          <div class="gh-field">
-            <label>起動モード</label>
-            <div class="gh-prof-tabs" id="hermes-browser-modes">
-              <button type="button" class="gh-prof-tab active" data-mode="headless">ヘッドレス</button>
-              <button type="button" class="gh-prof-tab" data-mode="desktop">デスクトップ</button>
-            </div>
-          </div>
-          <div class="gh-status" id="hermes-browser-status">読み込み中…</div>
-          <div class="gh-actions">
-            <button id="btn-hermes-browser-start" class="btn small primary" title="選択したモードで CDP ブラウザを起動する">CDPブラウザ起動</button>
-            <button id="btn-hermes-browser-stop" class="btn small danger" title="Hermes 用の CDP ブラウザを停止する">停止</button>
-          </div>
-          <div class="gh-status" style="white-space:normal">
-            <code>http://localhost:9222</code> で待ち受けます。<b>ヘッドレス</b>は Xvfb 上の専用ブラウザで KDE セッションに影響しません。<b>デスクトップ</b>は KDE にウィンドウを表示します。開いているブラウザに CDP は後付けできないため、専用プロファイルで別起動します。
-          </div>
-        </div>
-        <div class="gh-section">
-          <div class="gh-sec-head"><span>ログ</span></div>
-          <pre id="hermes-log" class="beacon-log" hidden></pre>
-          <div id="hermes-log-empty" class="gh-status">インストール実行時にログを表示します</div>
         </div>
       </div>
     </aside>
