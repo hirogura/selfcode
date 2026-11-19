@@ -225,7 +225,7 @@ body.resizing-h { cursor: row-resize; user-select: none; }
   display: flex; align-items: center; justify-content: center;
 }
 .empty-state h1 { margin: 0 0 6px; color: var(--fg); font-weight: 600; }
-.empty-shortcuts { display: flex; gap: 18px; justify-content: center; font-size: 12px; }
+.empty-shortcuts { display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 12px; }
 kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-family: var(--mono); font-size: 11px; }
 
 /* ターミナルはエディタや AI設定と同じ階層に置く。ペインを増やすと内容幅に合わせて伸び、
