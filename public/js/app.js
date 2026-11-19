@@ -2361,7 +2361,7 @@ const App = (() => {
     if (savedEditor > 0) applyEditorWidth(savedEditor);
     const saved = parseFloat(localStorage.getItem(TERM_PANE_W_KEY));
     // 旧デフォルト(520px)が保存されている場合は新しいデフォルトへ更新する
-    if (saved > 0) applyTermPaneWidth(saved === TERM_PANE_W_OLD_DEFAULT ? TERM_PANE_W_DEFAULT : saved);
+    if (saved > 0) applyTermPaneWidth(Math.round(saved) === TERM_PANE_W_OLD_DEFAULT ? TERM_PANE_W_DEFAULT : saved);
 
     const onMove = (e) => {
       if (!state.mode) return;
