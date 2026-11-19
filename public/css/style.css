@@ -906,3 +906,11 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
 }
 #hermes-status { white-space: pre-wrap; }
 #hermes-log { max-height: 180px; }
+
+/* 各パネルの見出しの高さをメモパネル（2行）に揃える */
+.panel-head, .memo-head, .github-head, .aisettings-head, .hermes-head {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  height: 48px;
+  overflow: hidden;
+}
