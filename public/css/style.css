@@ -136,6 +136,9 @@ button, select, textarea, input { font: inherit; color: inherit; }
 }
 /* 見た目は 5px のまま、掴める範囲を左右に広げる */
 .divider-v::before { content: ""; position: absolute; left: -4px; right: -4px; top: 0; bottom: 0; }
+/* Hermes / AI設定 / GitHub は固定幅。区切り線は表示専用でドラッグしない */
+#divider-hermes, #divider-aisettings, #divider-github { pointer-events: none; cursor: default; }
+#divider-hermes::before, #divider-aisettings::before, #divider-github::before { content: none; }
 .divider-v:hover, .divider-v.active { background: var(--accent-2); }
 .divider-h {
   height: 5px;

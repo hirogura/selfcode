@@ -2368,13 +2368,6 @@ const App = (() => {
       } else if (state.mode === "memo-panel") {
         const w = clamp(state.startW + (state.startX - e.clientX), 280, layout.clientWidth * 0.6);
         els.memoPanel.style.width = w + "px";
-      } else if (state.mode === "github") {
-        const w = clamp(state.startW + (state.startX - e.clientX), 280, layout.clientWidth * 0.6);
-        els.github.style.width = w + "px";
-      } else if (state.mode === "aisettings") {
-        const w = clamp(state.startW + (state.startX - e.clientX), 240, layout.clientWidth * 0.6);
-        const panel = $("aisettings");
-        if (panel) panel.style.width = w + "px";
       } else if (state.mode === "main") {
         // 右へドラッグでエディタを広げ、ターミナル以降を右へ押し出す
         applyEditorWidth(state.startW + (e.clientX - state.startX));
@@ -2409,10 +2402,8 @@ const App = (() => {
       window.addEventListener("pointerup", onUp);
     };
     // pointer イベントを使うことでマウスとタッチ（iPad など）の両方でドラッグできる
+    // Hermes / AI設定 / GitHub は固定幅のためリサイザーを付けない
     $("divider-sidebar").addEventListener("pointerdown", (e) => begin(e, "sidebar", els.sidebar));
-    $("divider-hermes").addEventListener("pointerdown", (e) => begin(e, "hermes", $("hermes")));
-    $("divider-github").addEventListener("pointerdown", (e) => begin(e, "github", els.github));
-    $("divider-aisettings").addEventListener("pointerdown", (e) => begin(e, "aisettings", $("aisettings")));
     $("divider-memo-panel").addEventListener("pointerdown", (e) => begin(e, "memo-panel", els.memoPanel));
     $("divider-terminal").addEventListener("pointerdown", (e) => begin(e, "main", els.main));
     // ターミナル見出しのハンドル: 右へドラッグでターミナル（各ペイン）を広げる
