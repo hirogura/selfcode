@@ -27,9 +27,6 @@ const App = (() => {
   const models = new Map();
   let activePath = null;
   let selectedDir = "";
-  // タッチ端末（iPad など）では区切り線のドラッグが使いにくいため、ターミナルを開いたときに広げる判定に使う
-  const IS_TOUCH = "ontouchstart" in window || navigator.maxTouchPoints > 0;
-
   // エクスプローラで展開中のフォルダ（リロード後も復元する）
   const expandedDirs = new Set();
 
@@ -786,6 +783,16 @@ const App = (() => {
     return firstPaneIn(termState.root);
   }
 
+  // ペインが横スクロール領域の表示範囲外にあるときは、見える位置までスクロールする
+  function revealPane(pane) {
+    if (!pane || !pane.el) return;
+    const ws = els.terminalWorkspace;
+    const pr = pane.el.getBoundingClientRect();
+    const wr = ws.getBoundingClientRect();
+    if (pr.left < wr.left) ws.scrollLeft -= (wr.left - pr.left) + 8;
+    else if (pr.right > wr.right) ws.scrollLeft += (pr.right - wr.right) + 8;
+  }
+
   function focusPane(pane) {
     if (!pane || pane.closed) return;
     termState.focused = pane;
@@ -793,6 +800,7 @@ const App = (() => {
       if (p.el) p.el.classList.toggle("focused", p === pane);
     }
     try { pane.term && pane.term.focus(); } catch {}
+    revealPane(pane);
     updateFreebuffBtn();
   }
 
@@ -999,40 +1007,34 @@ const App = (() => {
 
   function splitPane(pane) {
     if (!pane || pane.closed || !pane.node) return;
-    const node = pane.node;
-    // 親が横並び(row)なら縦に、それ以外は横に分割してグリッド状にする
-    const dir = node.parent && node.parent.kind === "row" ? "col" : "row";
+    // ターミナルはエディタ右側の横一列に並べる。新しいペインは常に列の右端に追加し、
+    // 画面に収まらなければワークスペースを横スクロールして表示する。
+    const oldRoot = termState.root;
+    if (!oldRoot) return;
+    const dir = "row";
     // 新しいペインは元のペインの cwd・ユーザーを引き継ぐ
     const newPane = createPane(pane.cwd, undefined, pane.user);
     const newNode = paneNode(newPane);
     newPane.node = newNode;
-    const wrap = splitNode(dir, node, newNode);
-    const parent = node.parent;
-    if (parent) {
-      const i = parent.children.indexOf(node);
-      if (i < 0) return;
-      parent.children[i] = wrap;
-      wrap.parent = parent;
-    } else {
-      termState.root = wrap;
-    }
-    node.parent = wrap;
+    const wrap = splitNode(dir, oldRoot, newNode);
+    oldRoot.parent = wrap;
     newNode.parent = wrap;
+    termState.root = wrap;
     const wrapEl = document.createElement("div");
-    wrapEl.className = dir === "row" ? "term-split-row" : "term-split-col";
+    wrapEl.className = "term-split-row";
     const div = document.createElement("div");
     div.className = "term-divider";
     wrap.el = wrapEl;
     wrap.divEl = div;
     buildPaneDom(newPane);
     openPaneTerminal(newPane);
-    node.el.replaceWith(wrapEl);
-    wrapEl.append(node.el, div, newPane.el);
+    oldRoot.el.replaceWith(wrapEl);
+    wrapEl.append(oldRoot.el, div, newPane.el);
     initDivider(div, wrapEl, dir);
     updateCloseButtons();
     focusPane(newPane);
     saveTermState();
-    requestAnimationFrame(fitAll);
+    requestAnimationFrame(() => { fitAll(); revealPane(newPane); });
   }
 
   function closePane(pane) {
@@ -1303,18 +1305,18 @@ const App = (() => {
   }
 
   function showTerminalPanel() {
-    const wasHidden = els.terminal.classList.contains("hidden");
     els.terminal.classList.remove("hidden");
     $("btn-terminal").classList.add("active");
     $("divider-terminal").classList.remove("hidden");
     localStorage.setItem(TERM_VISIBLE_KEY, "1");
-    // iPad などタッチ端末では区切り線のドラッグで高さを変えられないため、
-    // ターミナルを開いたときはほぼ全高まで広げて使えるようにする
-    if (wasHidden && IS_TOUCH) els.terminal.style.height = termMaxH() + "px";
+    // 保存済みの幅を復元（ウィンドウが小さくなった場合は上限でクランプ）
+    const saved = parseFloat(localStorage.getItem(TERM_W_KEY));
+    if (saved > 0) els.terminal.style.width = clamp(saved, TERM_W_MIN, termMaxW()) + "px";
     setTimeout(() => {
       fitAll();
       const p = activePane();
       if (p && p.term) { try { p.term.focus(); } catch {} }
+      revealPane(p);
     }, 30);
   }
 
@@ -2269,13 +2271,13 @@ const App = (() => {
     return Math.max(min, Math.min(max, v));
   }
 
-  const TERM_H_KEY = "selfcode.termHeight";
-  const TERM_H_MIN = 60;
-  // 説明(空状態)を表示できる最小のエディタ領域の高さ（ターミナルが上がって狭くなると非表示）
+  const TERM_W_KEY = "selfcode.termWidth";
+  const TERM_W_MIN = 320;
+  // 説明(空状態)を表示できる最小のエディタ領域の高さ
   const EMPTY_MIN_H = 200;
-  // ターミナルはタブバーと区切り線を除いたほぼ全高まで広げられるようにする
-  function termMaxH() {
-    return Math.max(TERM_H_MIN + 1, $("layout").clientHeight - els.tabs.offsetHeight - 5);
+  // ターミナルはエディタ領域を残した幅まで広げられるようにする
+  function termMaxW() {
+    return Math.max(TERM_W_MIN + 1, els.main.clientWidth - 240);
   }
 
   function initResizers() {
@@ -2283,10 +2285,10 @@ const App = (() => {
     const state = { mode: null, startX: 0, startY: 0, startW: 0, startH: 0 };
 
 
-    // 保存済みのターミナル高さを復元（ウィンドウが小さくなった場合に備えて上限でクランプ）
-    const saved = parseFloat(localStorage.getItem(TERM_H_KEY));
+    // 保存済みのターミナル幅を復元（ウィンドウが小さくなった場合に備えて上限でクランプ）
+    const saved = parseFloat(localStorage.getItem(TERM_W_KEY));
     if (saved > 0) {
-      els.terminal.style.height = clamp(saved, TERM_H_MIN, termMaxH()) + "px";
+      els.terminal.style.width = clamp(saved, TERM_W_MIN, termMaxW()) + "px";
     }
 
     const onMove = (e) => {
@@ -2305,13 +2307,13 @@ const App = (() => {
         const panel = $("aisettings");
         if (panel) panel.style.width = w + "px";
       } else if (state.mode === "terminal") {
-        const h = clamp(state.startH + (state.startY - e.clientY), TERM_H_MIN, termMaxH());
-        els.terminal.style.height = h + "px";
+        const w = clamp(state.startW + (state.startX - e.clientX), TERM_W_MIN, termMaxW());
+        els.terminal.style.width = w + "px";
       }
     };
     const onUp = () => {
       if (state.mode === "terminal") {
-        localStorage.setItem(TERM_H_KEY, els.terminal.style.height);
+        localStorage.setItem(TERM_W_KEY, els.terminal.style.width);
       }
       state.mode = null;
       document.body.classList.remove("resizing-v", "resizing-h");
@@ -2327,7 +2329,8 @@ const App = (() => {
       state.startW = r.width;
       state.startH = r.height;
       e.preventDefault();
-      document.body.classList.add(mode === "terminal" ? "resizing-h" : "resizing-v");
+      // すべての区切り線が縦方向（幅調整）になった
+      document.body.classList.add("resizing-v");
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
     };
@@ -3188,9 +3191,9 @@ const App = (() => {
     });
 
     window.addEventListener("resize", () => {
-      // ウィンドウが小さくなった場合にターミナルが画面外にはみ出さないよう高さを上限でクランプ
-      const cur = parseFloat(els.terminal.style.height) || 0;
-      if (cur > termMaxH()) els.terminal.style.height = termMaxH() + "px";
+      // ウィンドウが小さくなった場合にエディタ領域が残るよう幅を上限でクランプ
+      const cur = parseFloat(els.terminal.style.width) || 0;
+      if (cur > termMaxW()) els.terminal.style.width = termMaxW() + "px";
       fitAll();
     });
 

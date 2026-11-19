@@ -182,6 +182,8 @@ body.resizing-h { cursor: row-resize; user-select: none; }
 .tree-node.expanded + .tree-children { display: block; }
 
 #main { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
+/* エディタとターミナルを左右に並べる領域 */
+#main-body { flex: 1; display: flex; min-height: 0; min-width: 0; }
 
 .tabs { display: flex; align-items: center; height: 34px; background: var(--bg-2); border-bottom: 1px solid var(--border); overflow-x: auto; flex: 0 0 auto; }
 .tab {
@@ -204,7 +206,7 @@ body.resizing-h { cursor: row-resize; user-select: none; }
 .tab .dirty-dot { display: none; color: var(--fg-dim); font-size: 9px; cursor: pointer; margin-left: 2px; }
 .tab.dirty .dirty-dot { display: inline; }
 
-.editor-host { flex: 1; position: relative; min-height: 0; }
+.editor-host { flex: 1; position: relative; min-height: 0; min-width: 0; }
 .empty-state { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--fg-dim); z-index: 5; }
 .empty-inner { text-align: center; }
 .empty-logo {
@@ -218,18 +220,34 @@ body.resizing-h { cursor: row-resize; user-select: none; }
 .empty-shortcuts { display: flex; gap: 18px; justify-content: center; font-size: 12px; }
 kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-family: var(--mono); font-size: 11px; }
 
-.terminal { height: 210px; border-top: 1px solid var(--border); display: flex; flex-direction: column; background: #0b0f14; flex: 0 0 auto; }
+/* ターミナルはエディタの右側に縦長パネルとして配置する。幅はドラッグで変更可能 */
+.terminal {
+  --term-pane-w: 520px;
+  width: 48vw;
+  min-width: 360px;
+  max-width: 88vw;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  background: #0b0f14;
+  flex: 0 0 auto;
+}
 .terminal.hidden { display: none; }
 /* エディタを隠したときはターミナルが空いた領域全体に広がる */
-#main.editor-hidden .terminal { flex: 1 1 auto; height: auto !important; }
+#main.editor-hidden .terminal { flex: 1 1 auto; width: auto; min-width: 0; max-width: none; }
 .panel-head { display: flex; justify-content: space-between; align-items: center; padding: 3px 8px; background: var(--bg-2); font-size: 11px; font-weight: 600; letter-spacing: 1px; color: var(--fg-dim); border-bottom: 1px solid var(--border); }
 .panel-head .hint { font-weight: 400; letter-spacing: 0; color: var(--fg-dim); opacity: 0.7; }
-#terminal-workspace { flex: 1; min-height: 0; display: flex; }
-.term-split-row { display: flex; flex-direction: row; }
-.term-split-col { display: flex; flex-direction: column; }
-.term-split-row, .term-split-col { flex: 1; min-width: 0; min-height: 0; }
-.term-divider { flex: 0 0 5px; background: var(--border); touch-action: none; }
-.term-pane { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
+/* ターミナルパネルは横一列に並べ、画面に収まらなければ横スクロールで右へずらしていく */
+#terminal-workspace { flex: 1; min-height: 0; display: flex; align-items: stretch; overflow-x: auto; overflow-y: hidden; }
+.term-split-row { display: flex; flex-direction: row; height: 100%; }
+.term-split-col { display: flex; flex-direction: column; width: 100%; }
+/* flex:0 0 auto で子ペインの幅の合計に合わせ、はみ出す分はワークスペースがスクロールする */
+.term-split-row, .term-split-col { flex: 0 0 auto; min-width: 0; min-height: 0; }
+#terminal-workspace > .term-split-row { min-width: 100%; }
+/* ペインが1つだけのときはターミナル幅いっぱいに広げる */
+#terminal-workspace > .term-pane { flex: 1 1 auto; width: auto; }
+.term-divider { flex: 0 0 5px; background: var(--border); touch-action: none; cursor: col-resize; }
+.term-pane { flex: 0 0 var(--term-pane-w); width: var(--term-pane-w); min-width: 320px; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .term-pane-head {
   display: flex;
   align-items: center;
@@ -461,7 +479,6 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
 ::-webkit-scrollbar-thumb:hover { background: #4c545d; }
 ::-webkit-scrollbar-track { background: transparent; }
 
-#terminal-workspace { overflow: hidden; }
 .term-pane-actions { display: flex; align-items: center; gap: 3px; }
 .term-pane-actions .btn { padding: 0 6px; line-height: 18px; font-size: 12px; opacity: .55; }
 .term-pane-head:hover .term-pane-actions .btn { opacity: 1; }
