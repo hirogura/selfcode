@@ -833,12 +833,17 @@ const App = (() => {
     head.append(title, actions);
     const host = document.createElement("div");
     host.className = "term-pane-host";
-    el.append(head, host);
+    // 右端のハンドル（ここを右へドラッグすると、このペインだけが広がる）
+    const edge = document.createElement("div");
+    edge.className = "term-pane-edge";
+    edge.title = "右へドラッグでこのターミナルを広げる／左へで狭める";
+    el.append(head, host, edge);
     pane.el = el;
     pane.host = host;
     pane.titleEl = title;
     if (pane.node) pane.node.el = el;
     el.addEventListener("mousedown", (e) => { if (e.button === 0) focusPane(pane); });
+    edge.addEventListener("pointerdown", (e) => startPaneResize(pane, e));
     saveMdBtn.onclick = (e) => {
       e.stopPropagation();
       savePaneMd(pane);
@@ -1166,6 +1171,28 @@ const App = (() => {
     toast("ターミナルをリフレッシュしました", false);
   }
 
+  // ペイン右端のハンドルで、そのペインだけを広げ／狭める
+  function startPaneResize(pane, e) {
+    if (!pane || !pane.el || !pane.el.isConnected) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startW = pane.el.getBoundingClientRect().width;
+    const onMove = (ev) => {
+      const w = clamp(startW + (ev.clientX - startX), TERM_PANE_W_MIN, TERM_PANE_W_MAX);
+      pane.el.style.flex = `0 0 ${w}px`;
+      pane.el.style.width = w + "px";
+      fitAll();
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      fitAll();
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
   function initDivider(div, wrapEl, dir) {
     div.style.cursor = dir === "row" ? "col-resize" : "row-resize";
     div.addEventListener("pointerdown", (e) => {
@@ -1182,9 +1209,21 @@ const App = (() => {
       div.classList.add("active");
       const onMove = (ev) => {
         const d = (dir === "row" ? ev.clientX : ev.clientY) - start;
-        const na = clamp(sa + d, 40, sa + sb - 40);
-        a.style.flex = `0 0 ${na}px`;
-        b.style.flex = "1 1 0";
+        if (dir === "col") {
+          const na = clamp(sa + d, 40, sa + sb - 40);
+          a.style.flex = `0 0 ${na}px`;
+          b.style.flex = "1 1 0";
+        } else if (d >= 0) {
+          // 右へドラッグ: 右のペイン（2枚目など）を広げ、後続を右へ押し出す
+          const nb = clamp(sb + d, TERM_PANE_W_MIN, TERM_PANE_W_MAX);
+          a.style.flex = `0 0 ${sa}px`; a.style.width = sa + "px";
+          b.style.flex = `0 0 ${nb}px`; b.style.width = nb + "px";
+        } else {
+          // 左へドラッグ: 左のペインを広げる
+          const na = clamp(sa - d, TERM_PANE_W_MIN, TERM_PANE_W_MAX);
+          a.style.flex = `0 0 ${na}px`; a.style.width = na + "px";
+          b.style.flex = `0 0 ${sb}px`; b.style.width = sb + "px";
+        }
         fitAll();
       };
       const onUp = () => {
@@ -2343,6 +2382,10 @@ const App = (() => {
   function applyTermPaneWidth(px) {
     currentTermPaneW = clamp(px, TERM_PANE_W_MIN, TERM_PANE_W_MAX);
     els.terminal.style.setProperty("--term-pane-w", currentTermPaneW + "px");
+    // 個別に幅を変えたペインがあれば、全体指定に戻す
+    for (const p of termState.panes.values()) {
+      if (p.el) { p.el.style.width = ""; p.el.style.flex = ""; }
+    }
   }
 
   function initResizers() {

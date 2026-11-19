@@ -265,6 +265,9 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
 .term-split-row, .term-split-col { flex: 0 0 auto; min-width: 0; min-height: 0; }
 .term-divider { flex: 0 0 5px; background: var(--border); touch-action: none; cursor: col-resize; }
 .term-pane { flex: 0 0 var(--term-pane-w); width: var(--term-pane-w); min-width: 320px; min-height: 0; display: flex; flex-direction: column; position: relative; }
+/* 各ペインの右端ハンドル（ドラッグでこのペインだけ幅を変える） */
+.term-pane-edge { position: absolute; top: 0; right: 0; width: 8px; height: 100%; cursor: col-resize; z-index: 5; touch-action: none; }
+.term-pane-edge:hover { background: var(--accent-2); opacity: .35; }
 .term-pane-head {
   display: flex;
   align-items: center;
