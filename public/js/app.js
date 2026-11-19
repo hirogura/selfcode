@@ -1089,11 +1089,34 @@ const App = (() => {
     }
   }
 
-  // このペインの出力をプレーンテキストに変換して terminalmd/日付-連番.md に保存する
+  // xterm のバッファからテキストを取り出す。
+  // TUI（opencode 等）は単語や文字ごとにカーソル移動を伴って描画されるため、
+  // 生ログを ANSI 除去するだけでは画面の文章がバラバラになる。表示中の画面を
+  // そのまま読むことで、TUI でも通常シェルでも見えている内容を正しく保存できる。
+  function terminalText(pane) {
+    const term = pane && pane.term;
+    const buffers = term && term.buffer;
+    if (!buffers || !buffers.active) return stripAnsi(pane.log || "");
+    const buf = buffers.active;
+    const isAlt = buffers.alternate === buf;
+    // alternate バッファは表示領域だけ、通常バッファはスクロールバック込みの全行
+    const start = isAlt ? buf.viewportY : 0;
+    const end = isAlt ? Math.min(buf.length, start + term.rows) : buf.length;
+    const lines = [];
+    for (let i = start; i < end; i++) {
+      const line = buf.getLine(i);
+      lines.push(line ? line.translateToString(true).replace(/[\s\u00a0]+$/, "") : "");
+    }
+    while (lines.length && !lines[0].trim()) lines.shift();
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+    return lines.join("\n");
+  }
+
+  // このペインの表示内容をテキストにして terminalmd/日付-連番.md に保存する
   async function savePaneMd(pane) {
     if (!pane || pane.closed) return;
     const btn = pane.el && pane.el.querySelector(".term-pane-actions .save-md-pane");
-    const text = stripAnsi(pane.log || "").replace(/\r/g, "").replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+    const text = terminalText(pane).replace(/\r/g, "").trimEnd() + "\n";
     if (!text.trim()) {
       toast("保存するターミナル出力がありません", true);
       return;
