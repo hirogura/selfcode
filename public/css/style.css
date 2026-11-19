@@ -126,6 +126,7 @@ button, select, textarea, input { font: inherit; color: inherit; }
 #layout > * { flex-shrink: 0; }
 
 .divider-v {
+  position: relative;
   width: 5px;
   flex: 0 0 auto;
   cursor: col-resize;
@@ -133,6 +134,8 @@ button, select, textarea, input { font: inherit; color: inherit; }
   transition: background .15s;
   touch-action: none; /* iPad などのタッチ操作でもドラッグできるようにする */
 }
+/* 見た目は 5px のまま、掴める範囲を左右に広げる */
+.divider-v::before { content: ""; position: absolute; left: -4px; right: -4px; top: 0; bottom: 0; }
 .divider-v:hover, .divider-v.active { background: var(--accent-2); }
 .divider-h {
   height: 5px;
@@ -238,6 +241,9 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
 .terminal.hidden { display: none; }
 .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-width: 0; padding: 3px 8px; background: var(--bg-2); font-size: 11px; font-weight: 600; letter-spacing: 1px; color: var(--fg-dim); border-bottom: 1px solid var(--border); }
 .panel-head > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 横スクロールで区切り線が見えなくなっても幅を調整できるよう、見出しにハンドルを置く */
+.term-resize-grip { display: inline-block; cursor: col-resize; padding: 0 5px; margin-right: 3px; color: var(--fg-dim); user-select: none; touch-action: none; }
+.term-resize-grip:hover { color: var(--accent-2); }
 /* ヒントはペイン幅に合わせて省略し、ターミナルの最小幅を押し上げないようにする */
 .panel-head .hint {
   display: inline-block;

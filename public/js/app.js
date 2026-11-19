@@ -784,16 +784,17 @@ const App = (() => {
     return firstPaneIn(termState.root);
   }
 
-  // ペインが表示範囲外にあるときは、見える位置まで横スクロールする
+  // 必要ならターミナル内のスクロールだけ調整する。
+  // layout は自動スクロールしない（左端の幅調整用区切り線を常に掴めるようにするため。
+  // はみ出した分は利用者が横スクロールして表示する）。
   function revealPane(pane) {
     if (!pane || !pane.el) return;
-    for (const sc of [els.layout, els.terminalWorkspace]) {
-      if (!sc) continue;
-      const pr = pane.el.getBoundingClientRect();
-      const wr = sc.getBoundingClientRect();
-      if (pr.left < wr.left) sc.scrollLeft -= (wr.left - pr.left) + 8;
-      else if (pr.right > wr.right) sc.scrollLeft += (pr.right - wr.right) + 8;
-    }
+    const sc = els.terminalWorkspace;
+    if (!sc) return;
+    const pr = pane.el.getBoundingClientRect();
+    const wr = sc.getBoundingClientRect();
+    if (pr.left < wr.left) sc.scrollLeft -= (wr.left - pr.left) + 8;
+    else if (pr.right > wr.right) sc.scrollLeft += (pr.right - wr.right) + 8;
   }
 
   function focusPane(pane) {
@@ -2392,6 +2393,9 @@ const App = (() => {
     $("divider-aisettings").addEventListener("pointerdown", (e) => begin(e, "aisettings", $("aisettings")));
     $("divider-memo-panel").addEventListener("pointerdown", (e) => begin(e, "memo-panel", els.memoPanel));
     $("divider-terminal").addEventListener("pointerdown", (e) => begin(e, "terminal", els.terminal));
+    // layout が横スクロールして区切り線が画面外に出ても、見出しのハンドルから幅を変更できるようにする
+    const termGrip = els.terminal.querySelector(".term-resize-grip");
+    if (termGrip) termGrip.addEventListener("pointerdown", (e) => begin(e, "terminal", els.terminal));
   }
 
 
