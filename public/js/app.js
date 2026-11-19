@@ -2325,7 +2325,7 @@ const App = (() => {
 
   // 区切り線のドラッグでは、左側のパネルを広げて後続を右へ押し出す（エクスプローラと同じ動作）
   const EDITOR_W_KEY = "selfcode.editorWidth";
-  const EDITOR_W_MIN = 170;
+  const EDITOR_W_MIN = 150;
   const EDITOR_W_MAX = 3000;
   let currentEditorW = 0;
   // ターミナル見出しのハンドルで各ペインの幅を変更する
