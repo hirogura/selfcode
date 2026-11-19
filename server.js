@@ -207,7 +207,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "4.6.6",
+    version: "4.6.7",
     bootId: BOOT_ID,
     workspace: ROOT,
     distro: DISTRO,
