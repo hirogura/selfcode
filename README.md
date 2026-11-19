@@ -1,6 +1,6 @@
 # selfcode
 
-code-server のようにブラウザから使えて、opencode / freebuff / cline / kilo / Antigravity (agy) / GitHub Copilot CLI / Hermes などの AI エージェント連携や GitHub 連携がある、セルフホスト型コードエディタです。現在のバージョンは **v4.6.7** です。
+code-server のようにブラウザから使えて、opencode / freebuff / cline / kilo / Antigravity (agy) / GitHub Copilot CLI / Hermes などの AI エージェント連携や GitHub 連携がある、セルフホスト型コードエディタです。現在のバージョンは **v.4.7.0** です。
 
 - Monaco エディタ（VS Code と同じエディタエンジン）
 - ファイルツリー / タブ編集 / 保存（Ctrl+S） / ファイル・フォルダのダウンロード（ホストは ZIP、コンテナ内は tar.gz）
@@ -160,6 +160,7 @@ sudo tailscale serve --bg --https=3339 http://127.0.0.1:3339
 - 左の EXPLORER からファイルを開き、`Ctrl+S` で保存。ファイル／フォルダは右クリックから **ダウンロード**（ホストは ZIP、コンテナ内は tar.gz）できます
 - 右上の **opencode** / **cline** / **kilo** / **freebuff** / **agy**（Antigravity CLI）/ **Copilot**（GitHub Copilot CLI）ボタンで、**ターミナルを分割**して新しいペインで各 CLI を起動
   - CLI が未インストールの場合は `[Y/n]` で確認（Enter または `y` で自動インストールして起動。kilo は導入後に `kilo auth login` も実行されます）
+  - AI設定パネルの **opencode** カードで「**更新**」ボタンを押すと、`opencode upgrade` を実行して opencode CLI を最新版に更新できます（コンテナ選択中はコンテナ内の opencode を更新。結果は同カードと最下部の「ログ」カードに表示）
   - Copilot は導入済みならそのまま起動します。初回は起動後に `/login` と入力して GitHub に認証してください
   - AI設定パネルの **Copilot** カードで「自動承認」を ON にすると、`--allow-all`（全ツール・パス・URL の承認をスキップ）付きで起動します
   - **root** ボタン（root モード）を ON にすると、これらを root 権限で起動します

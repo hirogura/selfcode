@@ -108,6 +108,9 @@ const API = (() => {
     },
     restart: () => API.post("/api/restart", {}, undefined, 5000),
     update: (force) => API.post("/api/update", { force: !!force }, undefined, 960000),
+    opencode: {
+      upgrade: () => API.post("/api/opencode/upgrade", {}, undefined, 300000),
+    },
 
     github: {
       status: () => API.get("/api/github/status"),

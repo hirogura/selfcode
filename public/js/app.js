@@ -1469,6 +1469,36 @@ const App = (() => {
     openToolInTerminal("copilot");
   }
 
+  // ---- AI設定パネルの opencode カード「更新」ボタン ----
+  // selfcode アップデートとは別に、opencode CLI だけを最新に更新する（opencode upgrade）。
+  // コンテナ選択中はコンテナ内の opencode を更新する（サーバー側で対象を切り替える）。
+  let opencodeUpdateRunning = false;
+
+  async function updateOpencode() {
+    const btn = $("btn-oc-update");
+    const status = $("ais-oc-update-status");
+    if (!btn || opencodeUpdateRunning) return;
+    opencodeUpdateRunning = true;
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "更新中…";
+    if (status) status.textContent = "opencode を更新しています…（数分かかることがあります）";
+    try {
+      const r = await API.opencode.upgrade();
+      const version = r && r.version ? `（${r.version}）` : "";
+      if (status) status.textContent = `opencode を更新しました${version}`;
+      toast("opencode を最新版に更新しました" + version);
+      if (r && r.output) renderAiLog("[opencode upgrade]\n" + String(r.output).trim());
+    } catch (e) {
+      if (status) status.textContent = "更新に失敗しました: " + e.message;
+      toast("opencode の更新に失敗しました: " + e.message, true);
+    } finally {
+      opencodeUpdateRunning = false;
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  }
+
   function toggleRootMode() {
     rootMode = !rootMode;
     $("btn-root").classList.toggle("active", rootMode);
@@ -3088,6 +3118,7 @@ const App = (() => {
     $("btn-freebuff").onclick = openFreebuffTerminal;
     $("btn-cline").onclick = openClineTerminal;
     $("btn-opencode").onclick = openOpencodeTerminal;
+    $("btn-oc-update").onclick = updateOpencode;
     $("btn-kilo").onclick = openKiloTerminal;
     $("btn-ag").onclick = openAgTerminal;
     $("btn-copilot").onclick = openCopilotTerminal;

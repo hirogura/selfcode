@@ -207,7 +207,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "4.6.7",
+    version: "4.7.0",
     bootId: BOOT_ID,
     workspace: ROOT,
     distro: DISTRO,
@@ -224,9 +224,12 @@ app.get("/api/status", (req, res) => {
 // beacon endpoint install --harness <BEACON_HARNESSES> で行う。
 
 // runCmd と違い終了コードを問わず出力を返す（systemctl is-active の "inactive" 判定などで使う）
-function runOut(bin, args, timeoutMs) {
+function runOut(bin, args, timeoutMs, opts = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(bin, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      ...(opts.env ? { env: opts.env } : {}),
+    });
     const out = [];
     const err = [];
     const to = setTimeout(() => {
@@ -1353,6 +1356,43 @@ app.post("/api/headless-browser/log/clear", (req, res) => {
   headlessBrowserInstall.log = [];
   japaneseFontInstall.log = [];
   res.json({ ok: true });
+});
+
+// ================= opencode アップデート（AI設定パネルの opencode カード） =================
+// selfcode 自身のアップデート (/api/update) とは別に、opencode CLI だけを更新する。
+// 「更新」ボタン押下時に opencode upgrade を実行し、完了後にバージョンを返す。
+// コンテナ選択中はコンテナ内の opencode を更新する。
+app.post("/api/opencode/upgrade", async (req, res, next) => {
+  try {
+    const bin = OC_BIN_RAW === "opencode" ? "opencode" : shq(OC_BIN_RAW);
+    const script =
+      'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"; ' +
+      `B="$(command -v ${bin} 2>/dev/null || echo ${bin})"; ` +
+      '"$B" upgrade 2>&1; ' +
+      'echo "---VERSION---"; "$B" --version 2>/dev/null | head -n 1';
+    let output = "";
+    if (containerCtx) {
+      const r = await runContainer(["sh", "-c", script], { timeoutMs: 300000 });
+      output = r.stdout.toString("utf8");
+    } else {
+      const env = { ...process.env };
+      if (!env.HOME) env.HOME = os.homedir();
+      const r = await runOut("sh", ["-c", script], 300000, { env });
+      output = (r.out || "") + (r.err || "");
+      if (r.code !== 0) throw new Error(output.trim() || `opencode upgrade が失敗しました (exit ${r.code})`);
+    }
+    const parts = output.split("---VERSION---");
+    const logText = (parts[0] || "").trim();
+    const version = parts.length > 1 ? (parts[1] || "").trim().split("\n")[0] : "";
+    res.json({
+      ok: true,
+      output: logText,
+      version,
+      target: containerCtx ? { name: containerCtx.name, runtime: containerCtx.runtime } : null,
+    });
+  } catch (e) {
+    next(e);
+  }
 });
 
 // ================= 一時SSH（agy などの OAuth 認証を手元 PC から行えるようにする） =================
