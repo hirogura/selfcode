@@ -121,7 +121,9 @@ button, select, textarea, input { font: inherit; color: inherit; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .divider { width: 1px; height: 20px; background: var(--border); }
 
-#layout { display: flex; flex: 1; min-height: 0; }
+/* パネルを右へ足した分は layout 全体の横スクロールで表示する */
+#layout { display: flex; flex: 1; min-height: 0; overflow-x: auto; overflow-y: hidden; align-items: stretch; }
+#layout > * { flex-shrink: 0; }
 
 .divider-v {
   width: 5px;
@@ -145,6 +147,7 @@ body.resizing-v { cursor: col-resize; user-select: none; }
 body.resizing-h { cursor: row-resize; user-select: none; }
 
 #sidebar {
+  flex: 0 0 auto;
   width: 260px;
   min-width: 180px;
   overflow: auto;
@@ -181,9 +184,9 @@ body.resizing-h { cursor: row-resize; user-select: none; }
 .tree-children { display: none; }
 .tree-node.expanded + .tree-children { display: block; }
 
-#main { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
-/* エディタとターミナルを左右に並べる領域 */
-#main-body { flex: 1; display: flex; min-height: 0; min-width: 0; }
+#main { flex: 1 0 0; display: flex; flex-direction: column; min-width: 360px; background: var(--bg); }
+/* エディタを隠したときは空になったエディタ領域を畳む */
+#main.editor-hidden { flex: 0 0 auto; min-width: 0; }
 
 .tabs { display: flex; align-items: center; height: 34px; background: var(--bg-2); border-bottom: 1px solid var(--border); overflow-x: auto; flex: 0 0 auto; }
 .tab {
@@ -220,12 +223,12 @@ body.resizing-h { cursor: row-resize; user-select: none; }
 .empty-shortcuts { display: flex; gap: 18px; justify-content: center; font-size: 12px; }
 kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-family: var(--mono); font-size: 11px; }
 
-/* ターミナルはエディタの右側に縦長パネルとして配置する。幅はドラッグで変更可能 */
+/* ターミナルはエディタや AI設定と同じ階層に置く。ペインを増やすと内容幅に合わせて伸び、
+   右側のパネル（メモなど）を画面外へ押し出す */
 .terminal {
   --term-pane-w: 520px;
-  width: 48vw;
-  min-width: 360px;
-  max-width: 88vw;
+  width: max-content;
+  min-width: 320px;
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -233,19 +236,27 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
   flex: 0 0 auto;
 }
 .terminal.hidden { display: none; }
-/* エディタを隠したときはターミナルが空いた領域全体に広がる */
-#main.editor-hidden .terminal { flex: 1 1 auto; width: auto; min-width: 0; max-width: none; }
-.panel-head { display: flex; justify-content: space-between; align-items: center; padding: 3px 8px; background: var(--bg-2); font-size: 11px; font-weight: 600; letter-spacing: 1px; color: var(--fg-dim); border-bottom: 1px solid var(--border); }
-.panel-head .hint { font-weight: 400; letter-spacing: 0; color: var(--fg-dim); opacity: 0.7; }
-/* ターミナルパネルは横一列に並べ、画面に収まらなければ横スクロールで右へずらしていく */
-#terminal-workspace { flex: 1; min-height: 0; display: flex; align-items: stretch; overflow-x: auto; overflow-y: hidden; }
+.panel-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-width: 0; padding: 3px 8px; background: var(--bg-2); font-size: 11px; font-weight: 600; letter-spacing: 1px; color: var(--fg-dim); border-bottom: 1px solid var(--border); }
+.panel-head > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ヒントはペイン幅に合わせて省略し、ターミナルの最小幅を押し上げないようにする */
+.panel-head .hint {
+  display: inline-block;
+  max-width: calc(var(--term-pane-w, 520px) - 230px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--fg-dim);
+  opacity: 0.7;
+}
+/* ターミナルパネルは横一列に並べ、増えた分は layout の横スクロールで表示する */
+#terminal-workspace { flex: 1; min-height: 0; display: flex; align-items: stretch; overflow: hidden; }
 .term-split-row { display: flex; flex-direction: row; height: 100%; }
 .term-split-col { display: flex; flex-direction: column; width: 100%; }
-/* flex:0 0 auto で子ペインの幅の合計に合わせ、はみ出す分はワークスペースがスクロールする */
+/* 子ペインの幅の合計がそのままターミナルパネルの幅になる */
 .term-split-row, .term-split-col { flex: 0 0 auto; min-width: 0; min-height: 0; }
-#terminal-workspace > .term-split-row { min-width: 100%; }
-/* ペインが1つだけのときはターミナル幅いっぱいに広げる */
-#terminal-workspace > .term-pane { flex: 1 1 auto; width: auto; }
 .term-divider { flex: 0 0 5px; background: var(--border); touch-action: none; cursor: col-resize; }
 .term-pane { flex: 0 0 var(--term-pane-w); width: var(--term-pane-w); min-width: 320px; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .term-pane-head {

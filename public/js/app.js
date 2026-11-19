@@ -9,6 +9,7 @@ const App = (() => {
     showHidden: $("show-hidden"),
     sidebar: $("sidebar"),
     main: $("main"),
+    layout: $("layout"),
     terminal: $("terminal"),
     terminalWorkspace: $("terminal-workspace"),
     memoPanel: $("memo-panel"),
@@ -783,14 +784,16 @@ const App = (() => {
     return firstPaneIn(termState.root);
   }
 
-  // ペインが横スクロール領域の表示範囲外にあるときは、見える位置までスクロールする
+  // ペインが表示範囲外にあるときは、見える位置まで横スクロールする
   function revealPane(pane) {
     if (!pane || !pane.el) return;
-    const ws = els.terminalWorkspace;
-    const pr = pane.el.getBoundingClientRect();
-    const wr = ws.getBoundingClientRect();
-    if (pr.left < wr.left) ws.scrollLeft -= (wr.left - pr.left) + 8;
-    else if (pr.right > wr.right) ws.scrollLeft += (pr.right - wr.right) + 8;
+    for (const sc of [els.layout, els.terminalWorkspace]) {
+      if (!sc) continue;
+      const pr = pane.el.getBoundingClientRect();
+      const wr = sc.getBoundingClientRect();
+      if (pr.left < wr.left) sc.scrollLeft -= (wr.left - pr.left) + 8;
+      else if (pr.right > wr.right) sc.scrollLeft += (pr.right - wr.right) + 8;
+    }
   }
 
   function focusPane(pane) {
@@ -1309,9 +1312,6 @@ const App = (() => {
     $("btn-terminal").classList.add("active");
     $("divider-terminal").classList.remove("hidden");
     localStorage.setItem(TERM_VISIBLE_KEY, "1");
-    // 保存済みの幅を復元（ウィンドウが小さくなった場合は上限でクランプ）
-    const saved = parseFloat(localStorage.getItem(TERM_W_KEY));
-    if (saved > 0) els.terminal.style.width = clamp(saved, TERM_W_MIN, termMaxW()) + "px";
     setTimeout(() => {
       fitAll();
       const p = activePane();
@@ -2271,13 +2271,16 @@ const App = (() => {
     return Math.max(min, Math.min(max, v));
   }
 
-  const TERM_W_KEY = "selfcode.termWidth";
-  const TERM_W_MIN = 320;
+  // 区切り線のドラッグでは、ターミナル全体ではなく各ペインの幅を変更する
+  const TERM_PANE_W_KEY = "selfcode.termPaneWidth";
+  const TERM_PANE_W_MIN = 320;
+  const TERM_PANE_W_MAX = 1200;
+  let currentTermPaneW = 520;
   // 説明(空状態)を表示できる最小のエディタ領域の高さ
   const EMPTY_MIN_H = 200;
-  // ターミナルはエディタ領域を残した幅まで広げられるようにする
-  function termMaxW() {
-    return Math.max(TERM_W_MIN + 1, els.main.clientWidth - 240);
+  function applyTermPaneWidth(px) {
+    currentTermPaneW = clamp(px, TERM_PANE_W_MIN, TERM_PANE_W_MAX);
+    els.terminal.style.setProperty("--term-pane-w", currentTermPaneW + "px");
   }
 
   function initResizers() {
@@ -2285,11 +2288,9 @@ const App = (() => {
     const state = { mode: null, startX: 0, startY: 0, startW: 0, startH: 0 };
 
 
-    // 保存済みのターミナル幅を復元（ウィンドウが小さくなった場合に備えて上限でクランプ）
-    const saved = parseFloat(localStorage.getItem(TERM_W_KEY));
-    if (saved > 0) {
-      els.terminal.style.width = clamp(saved, TERM_W_MIN, termMaxW()) + "px";
-    }
+    // 保存済みのターミナルペイン幅を復元
+    const saved = parseFloat(localStorage.getItem(TERM_PANE_W_KEY));
+    if (saved > 0) applyTermPaneWidth(saved);
 
     const onMove = (e) => {
       if (!state.mode) return;
@@ -2307,13 +2308,12 @@ const App = (() => {
         const panel = $("aisettings");
         if (panel) panel.style.width = w + "px";
       } else if (state.mode === "terminal") {
-        const w = clamp(state.startW + (state.startX - e.clientX), TERM_W_MIN, termMaxW());
-        els.terminal.style.width = w + "px";
+        applyTermPaneWidth(state.startW + (state.startX - e.clientX));
       }
     };
     const onUp = () => {
       if (state.mode === "terminal") {
-        localStorage.setItem(TERM_W_KEY, els.terminal.style.width);
+        localStorage.setItem(TERM_PANE_W_KEY, String(currentTermPaneW));
       }
       state.mode = null;
       document.body.classList.remove("resizing-v", "resizing-h");
@@ -2326,7 +2326,7 @@ const App = (() => {
       const r = el.getBoundingClientRect();
       state.startX = e.clientX;
       state.startY = e.clientY;
-      state.startW = r.width;
+      state.startW = mode === "terminal" ? currentTermPaneW : r.width;
       state.startH = r.height;
       e.preventDefault();
       // すべての区切り線が縦方向（幅調整）になった
@@ -3191,9 +3191,6 @@ const App = (() => {
     });
 
     window.addEventListener("resize", () => {
-      // ウィンドウが小さくなった場合にエディタ領域が残るよう幅を上限でクランプ
-      const cur = parseFloat(els.terminal.style.width) || 0;
-      if (cur > termMaxW()) els.terminal.style.width = termMaxW() + "px";
       fitAll();
     });
 
