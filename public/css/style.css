@@ -187,7 +187,7 @@ body.resizing-h { cursor: row-resize; user-select: none; }
 .tree-children { display: none; }
 .tree-node.expanded + .tree-children { display: block; }
 
-#main { flex: 1 0 0; display: flex; flex-direction: column; min-width: 360px; background: var(--bg); }
+#main { flex: 1 0 0; display: flex; flex-direction: column; min-width: var(--editor-w, 360px); background: var(--bg); }
 /* エディタを隠したときは空になったエディタ領域を畳む */
 #main.editor-hidden { flex: 0 0 auto; min-width: 0; }
 

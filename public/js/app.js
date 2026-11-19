@@ -2323,13 +2323,23 @@ const App = (() => {
     return Math.max(min, Math.min(max, v));
   }
 
-  // 区切り線のドラッグでは、ターミナル全体ではなく各ペインの幅を変更する
+  // 区切り線のドラッグでは、左側のパネルを広げて後続を右へ押し出す（エクスプローラと同じ動作）
+  const EDITOR_W_KEY = "selfcode.editorWidth";
+  const EDITOR_W_MIN = 240;
+  const EDITOR_W_MAX = 3000;
+  let currentEditorW = 0;
+  // ターミナル見出しのハンドルで各ペインの幅を変更する
   const TERM_PANE_W_KEY = "selfcode.termPaneWidth";
   const TERM_PANE_W_MIN = 320;
-  const TERM_PANE_W_MAX = 1200;
+  const TERM_PANE_W_MAX = 2400;
   let currentTermPaneW = 520;
   // 説明(空状態)を表示できる最小のエディタ領域の高さ
   const EMPTY_MIN_H = 200;
+  function applyEditorWidth(px) {
+    currentEditorW = clamp(px, EDITOR_W_MIN, EDITOR_W_MAX);
+    // flex:1 0 0 のまま最小幅を指定すると、free space を超えた分だけ後続を押し出せる
+    els.main.style.setProperty("--editor-w", currentEditorW + "px");
+  }
   function applyTermPaneWidth(px) {
     currentTermPaneW = clamp(px, TERM_PANE_W_MIN, TERM_PANE_W_MAX);
     els.terminal.style.setProperty("--term-pane-w", currentTermPaneW + "px");
@@ -2340,7 +2350,9 @@ const App = (() => {
     const state = { mode: null, startX: 0, startY: 0, startW: 0, startH: 0 };
 
 
-    // 保存済みのターミナルペイン幅を復元
+    // 保存済みのエディタ幅・ターミナルペイン幅を復元
+    const savedEditor = parseFloat(localStorage.getItem(EDITOR_W_KEY));
+    if (savedEditor > 0) applyEditorWidth(savedEditor);
     const saved = parseFloat(localStorage.getItem(TERM_PANE_W_KEY));
     if (saved > 0) applyTermPaneWidth(saved);
 
@@ -2359,12 +2371,18 @@ const App = (() => {
         const w = clamp(state.startW + (state.startX - e.clientX), 240, layout.clientWidth * 0.6);
         const panel = $("aisettings");
         if (panel) panel.style.width = w + "px";
-      } else if (state.mode === "terminal") {
-        applyTermPaneWidth(state.startW + (state.startX - e.clientX));
+      } else if (state.mode === "main") {
+        // 右へドラッグでエディタを広げ、ターミナル以降を右へ押し出す
+        applyEditorWidth(state.startW + (e.clientX - state.startX));
+      } else if (state.mode === "terminalGrip") {
+        // 見出しハンドルは右へドラッグでターミナルを広げる
+        applyTermPaneWidth(state.startW + (e.clientX - state.startX));
       }
     };
     const onUp = () => {
-      if (state.mode === "terminal") {
+      if (state.mode === "main") {
+        localStorage.setItem(EDITOR_W_KEY, String(currentEditorW));
+      } else if (state.mode === "terminalGrip") {
         localStorage.setItem(TERM_PANE_W_KEY, String(currentTermPaneW));
       }
       state.mode = null;
@@ -2378,7 +2396,7 @@ const App = (() => {
       const r = el.getBoundingClientRect();
       state.startX = e.clientX;
       state.startY = e.clientY;
-      state.startW = mode === "terminal" ? currentTermPaneW : r.width;
+      state.startW = mode === "main" ? r.width : mode === "terminalGrip" ? currentTermPaneW : r.width;
       state.startH = r.height;
       e.preventDefault();
       // すべての区切り線が縦方向（幅調整）になった
@@ -2392,10 +2410,10 @@ const App = (() => {
     $("divider-github").addEventListener("pointerdown", (e) => begin(e, "github", els.github));
     $("divider-aisettings").addEventListener("pointerdown", (e) => begin(e, "aisettings", $("aisettings")));
     $("divider-memo-panel").addEventListener("pointerdown", (e) => begin(e, "memo-panel", els.memoPanel));
-    $("divider-terminal").addEventListener("pointerdown", (e) => begin(e, "terminal", els.terminal));
-    // layout が横スクロールして区切り線が画面外に出ても、見出しのハンドルから幅を変更できるようにする
+    $("divider-terminal").addEventListener("pointerdown", (e) => begin(e, "main", els.main));
+    // ターミナル見出しのハンドル: 右へドラッグでターミナル（各ペイン）を広げる
     const termGrip = els.terminal.querySelector(".term-resize-grip");
-    if (termGrip) termGrip.addEventListener("pointerdown", (e) => begin(e, "terminal", els.terminal));
+    if (termGrip) termGrip.addEventListener("pointerdown", (e) => begin(e, "terminalGrip", els.terminal));
   }
 
 
