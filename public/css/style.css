@@ -232,7 +232,7 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
 /* ターミナルはエディタや AI設定と同じ階層に置く。ペインを増やすと内容幅に合わせて伸び、
    右側のパネル（メモなど）を画面外へ押し出す */
 .terminal {
-  --term-pane-w: 1040px;
+  --term-pane-w: 600px;
   width: max-content;
   min-width: 320px;
   border-left: 1px solid var(--border);
@@ -250,7 +250,7 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
 /* ヒントはペイン幅に合わせて省略し、ターミナルの最小幅を押し上げないようにする */
 .panel-head .hint {
   display: inline-block;
-  max-width: calc(var(--term-pane-w, 1040px) - 230px);
+  max-width: calc(var(--term-pane-w, 600px) - 230px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

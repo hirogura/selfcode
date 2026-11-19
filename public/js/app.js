@@ -2330,10 +2330,10 @@ const App = (() => {
   let currentEditorW = 0;
   // ターミナル見出しのハンドルで各ペインの幅を変更する
   const TERM_PANE_W_KEY = "selfcode.termPaneWidth";
+  const TERM_PANE_W_MIGRATED_KEY = "selfcode.termPaneWidth.migrated600";
   const TERM_PANE_W_MIN = 320;
   const TERM_PANE_W_MAX = 2400;
-  const TERM_PANE_W_DEFAULT = 1040;
-  const TERM_PANE_W_OLD_DEFAULT = 520; // v.4.6.5 以前のデフォルト幅
+  const TERM_PANE_W_DEFAULT = 600;
   let currentTermPaneW = TERM_PANE_W_DEFAULT;
   // 説明(空状態)を表示できる最小のエディタ領域の高さ
   const EMPTY_MIN_H = 200;
@@ -2360,8 +2360,14 @@ const App = (() => {
     const savedEditor = parseFloat(localStorage.getItem(EDITOR_W_KEY));
     if (savedEditor > 0) applyEditorWidth(savedEditor);
     const saved = parseFloat(localStorage.getItem(TERM_PANE_W_KEY));
-    // 旧デフォルト(520px)が保存されている場合は新しいデフォルトへ更新する
-    if (saved > 0) applyTermPaneWidth(Math.round(saved) === TERM_PANE_W_OLD_DEFAULT ? TERM_PANE_W_DEFAULT : saved);
+    if (!localStorage.getItem(TERM_PANE_W_MIGRATED_KEY)) {
+      // 600px への移行が初回のみ、保存済みの幅をデフォルトで上書きする
+      applyTermPaneWidth(TERM_PANE_W_DEFAULT);
+      localStorage.setItem(TERM_PANE_W_KEY, String(TERM_PANE_W_DEFAULT));
+      localStorage.setItem(TERM_PANE_W_MIGRATED_KEY, "1");
+    } else if (saved > 0) {
+      applyTermPaneWidth(saved);
+    }
 
     const onMove = (e) => {
       if (!state.mode) return;
