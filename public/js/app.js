@@ -2332,7 +2332,9 @@ const App = (() => {
   const TERM_PANE_W_KEY = "selfcode.termPaneWidth";
   const TERM_PANE_W_MIN = 320;
   const TERM_PANE_W_MAX = 2400;
-  let currentTermPaneW = 1040;
+  const TERM_PANE_W_DEFAULT = 1040;
+  const TERM_PANE_W_OLD_DEFAULT = 520; // v.4.6.5 以前のデフォルト幅
+  let currentTermPaneW = TERM_PANE_W_DEFAULT;
   // 説明(空状態)を表示できる最小のエディタ領域の高さ
   const EMPTY_MIN_H = 200;
   function applyEditorWidth(px) {
@@ -2358,7 +2360,8 @@ const App = (() => {
     const savedEditor = parseFloat(localStorage.getItem(EDITOR_W_KEY));
     if (savedEditor > 0) applyEditorWidth(savedEditor);
     const saved = parseFloat(localStorage.getItem(TERM_PANE_W_KEY));
-    if (saved > 0) applyTermPaneWidth(saved);
+    // 旧デフォルト(520px)が保存されている場合は新しいデフォルトへ更新する
+    if (saved > 0) applyTermPaneWidth(saved === TERM_PANE_W_OLD_DEFAULT ? TERM_PANE_W_DEFAULT : saved);
 
     const onMove = (e) => {
       if (!state.mode) return;
