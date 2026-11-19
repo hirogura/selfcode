@@ -512,7 +512,7 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
 
 /* ---- GitHub パネル ---- */
 .github {
-  width: 330px;
+  width: 325px;
   min-width: 280px;
   border-left: 1px solid var(--border);
   background: var(--bg);
