@@ -816,6 +816,10 @@ const App = (() => {
     title.className = "term-pane-title";
     const actions = document.createElement("div");
     actions.className = "term-pane-actions";
+    const saveMdBtn = document.createElement("button");
+    saveMdBtn.className = "btn small save-md-pane";
+    saveMdBtn.textContent = "md保存";
+    saveMdBtn.title = "このターミナルの内容を terminalmd/日付-連番.md に保存";
     const userBtn = document.createElement("button");
     userBtn.className = "btn small user-pane";
     userBtn.title = "ターミナルのユーザーを切り替える";
@@ -824,7 +828,7 @@ const App = (() => {
     // ターミナルウィンドウのツールバーと同じゴミ箱アイコン（＝このターミナルを閉じる）
     reset.innerHTML = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
     reset.title = "このターミナルを閉じる";
-    actions.append(userBtn, reset);
+    actions.append(saveMdBtn, userBtn, reset);
     head.append(title, actions);
     const host = document.createElement("div");
     host.className = "term-pane-host";
@@ -834,6 +838,10 @@ const App = (() => {
     pane.titleEl = title;
     if (pane.node) pane.node.el = el;
     el.addEventListener("mousedown", (e) => { if (e.button === 0) focusPane(pane); });
+    saveMdBtn.onclick = (e) => {
+      e.stopPropagation();
+      savePaneMd(pane);
+    };
     userBtn.onclick = (e) => {
       e.stopPropagation();
       toggleTermUser(pane);
@@ -1078,6 +1086,26 @@ const App = (() => {
     for (const p of termState.panes.values()) {
       const btn = p.el && p.el.querySelector(".term-pane-actions .reset-pane");
       if (btn) btn.disabled = single;
+    }
+  }
+
+  // このペインの出力をプレーンテキストに変換して terminalmd/日付-連番.md に保存する
+  async function savePaneMd(pane) {
+    if (!pane || pane.closed) return;
+    const btn = pane.el && pane.el.querySelector(".term-pane-actions .save-md-pane");
+    const text = stripAnsi(pane.log || "").replace(/\r/g, "").replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+    if (!text.trim()) {
+      toast("保存するターミナル出力がありません", true);
+      return;
+    }
+    if (btn) btn.disabled = true;
+    try {
+      const res = await API.terminal.saveMd(text);
+      toast("保存しました: " + (res && res.name ? res.name : "terminalmd"), false);
+    } catch (e) {
+      toast("保存に失敗しました: " + (e && e.message ? e.message : e), true);
+    } finally {
+      if (btn) btn.disabled = false;
     }
   }
 
@@ -2002,8 +2030,8 @@ const App = (() => {
     return String(s || "")
       .replace(/\x1b\][^\x07]*\x07/g, "")
       .replace(/\x1b\][^\x1b]*\x1b\\/g, "")
-      .replace(/\x1b\[[0-9;?]*m/g, "")
-      .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "\n")
+      .replace(/\x1b\[[0-?]*m/g, "")
+      .replace(/\x1b\[[0-?]*[a-zA-Z]/g, "\n")
       .replace(/\x1b[()][0-9A-Z]/g, "")
       .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "");
   }

@@ -491,6 +491,7 @@ kbd { background: var(--bg-3); border: 1px solid var(--border); border-radius: 4
 ::-webkit-scrollbar-track { background: transparent; }
 
 .term-pane-actions { display: flex; align-items: center; gap: 3px; }
+.term-pane-actions .save-md-pane { font-size: 10px; letter-spacing: 0; }
 .term-pane-actions .btn { padding: 0 6px; line-height: 18px; font-size: 12px; opacity: .55; }
 .term-pane-head:hover .term-pane-actions .btn { opacity: 1; }
 .term-pane-actions .btn:hover:not(:disabled) { background: var(--bg-3); }

@@ -103,6 +103,9 @@ const API = (() => {
       get: () => API.get("/api/memo"),
       put: (content) => API.put("/api/memo", { content }),
     },
+    terminal: {
+      saveMd: (text) => API.post("/api/terminal/save-md", { text }),
+    },
     restart: () => API.post("/api/restart", {}, undefined, 5000),
     update: (force) => API.post("/api/update", { force: !!force }, undefined, 960000),
 

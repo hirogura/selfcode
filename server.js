@@ -44,6 +44,8 @@ const SELFCODE_CONFIG_DIR = process.env.SELFCODE_CONFIG_DIR || "/opt/lxd-data/se
 // 旧バージョン（v.2.9.x 以前）が使っていた保存先。起動時に新ディレクトリへ自動移行する。
 const LEGACY_CONFIG_DIR = process.env.SELFCODE_LEGACY_CONFIG_DIR || "/opt/lxd-data/note/selfcode";
 const MEMO_FILE = process.env.SELFCODE_MEMO || SELFCODE_CONFIG_DIR + "/selfcode-memo.md";
+// ターミナルの内容を書き出す先（日付＋連番の .md ファイル）
+const TERM_MD_DIR = process.env.SELFCODE_TERM_MD_DIR || SELFCODE_CONFIG_DIR + "/terminalmd";
 const RESTART_CMD = process.env.SELFCODE_RESTART_CMD || "systemctl restart selfcode";
 const UPDATE_TIMEOUT_MS = Number(process.env.SELFCODE_UPDATE_TIMEOUT || 900000); // アップデートのタイムアウト（既定 15 分）
 const HIDDEN = new Set(["node_modules", ".git", "dist", "build", ".next", "__pycache__", ".venv", ".cache"]);
@@ -205,7 +207,7 @@ app.use(async (req, res, next) => {
 app.get("/api/status", (req, res) => {
   res.json({
     name: "selfcode",
-    version: "4.5.2",
+    version: "4.6.0",
     bootId: BOOT_ID,
     workspace: ROOT,
     distro: DISTRO,
@@ -1919,6 +1921,41 @@ app.put("/api/memo", async (req, res, next) => {
     await fsp.mkdir(path.dirname(MEMO_FILE), { recursive: true });
     await fsp.writeFile(MEMO_FILE, String(req.body.content ?? ""));
     res.json({ ok: true, path: MEMO_FILE });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ターミナル 1 ペインの内容を terminalmd/YYYYMMDD-N.md に保存する。
+// 連番は当日のファイルを走査して最大値+1とし、同時保存でも上書きしないよう排他作成する。
+app.post("/api/terminal/save-md", async (req, res, next) => {
+  try {
+    await fsp.mkdir(TERM_MD_DIR, { recursive: true });
+    const now = new Date();
+    const ymd =
+      String(now.getFullYear()) +
+      String(now.getMonth() + 1).padStart(2, "0") +
+      String(now.getDate()).padStart(2, "0");
+    let max = 0;
+    for (const name of await fsp.readdir(TERM_MD_DIR)) {
+      const m = name.match(new RegExp("^" + ymd + "-(\\d+)\\.md$"));
+      if (m) max = Math.max(max, parseInt(m[1], 10) || 0);
+    }
+    const content = String(req.body.text ?? "");
+    let n = max + 1;
+    let file = null;
+    for (;;) {
+      const candidate = path.join(TERM_MD_DIR, ymd + "-" + n + ".md");
+      try {
+        await fsp.writeFile(candidate, content, { flag: "wx" });
+        file = candidate;
+        break;
+      } catch (e) {
+        if (e.code === "EEXIST") { n++; continue; }
+        throw e;
+      }
+    }
+    res.json({ ok: true, file, name: path.basename(file) });
   } catch (e) {
     next(e);
   }
